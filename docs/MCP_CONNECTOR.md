@@ -120,10 +120,10 @@ handoff.
 - Token: `POST /oauth/token`
 - Revocation: `POST /oauth/revoke`
 
-Scopes are `quant.read`, `quant.ack`, `quant.checkout` and `offline_access`.
-`quant.checkout` covers the owner-approved QR helpers; the owner's single-use
-website permission remains the payment gate. A refresh token is issued only
-when `offline_access` was granted, and refresh tokens rotate. The OAuth
+Scopes are `quant.read`, `quant.ack` and `offline_access`. The owner-approved
+QR helpers use `quant.read`; the owner's single-use website permission remains
+the payment gate. A refresh token is issued only when `offline_access` was
+granted, and refresh tokens rotate. The OAuth
 `resource` value is validated against `https://quant.example.com/mcp` (the bare
 origin is accepted for compatibility clients).
 

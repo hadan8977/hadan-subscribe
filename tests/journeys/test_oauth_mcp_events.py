@@ -50,7 +50,7 @@ def start_authorize(client, client_id, redirect, challenge, state="state-123"):
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "resource": "http://testserver",
-            "scope": "quant.read quant.ack quant.checkout offline_access",
+            "scope": "quant.read quant.ack offline_access",
             "state": state,
         },
         follow_redirects=False,
@@ -137,7 +137,7 @@ def test_oauth_metadata_and_anonymous_mcp_discovery(journey):
     assert tools.status_code == 200
     by_name = {t["name"]: t for t in tools.json()["result"]["tools"]}
     assert {"read_content", "prepare_checkout", "get_checkout_status", "get_checkout_qr"} <= set(by_name)
-    assert by_name["prepare_checkout"]["securitySchemes"][0]["scopes"] == ["quant.checkout"]
+    assert by_name["prepare_checkout"]["securitySchemes"][0]["scopes"] == ["quant.read"]
     # ChatGPT's validator sends valid JSON-RPC as application/octet-stream.
     octet = client.post(
         "/mcp",

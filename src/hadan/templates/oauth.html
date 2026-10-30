@@ -19,7 +19,7 @@
     </div>
     <ul class="oauth-scopes">
       {% for scope in scopes %}
-        <li>{% if scope == 'quant.read' %}{{t('oauth_scope_read')}}{% elif scope == 'quant.ack' %}{{t('oauth_scope_ack')}}{% elif scope == 'quant.checkout' %}{{t('oauth_scope_checkout')}}{% elif scope == 'offline_access' %}{{t('oauth_scope_offline')}}{% else %}{{scope}}{% endif %}</li>
+        <li>{% if scope == 'quant.read' %}{{t('oauth_scope_read')}}{% elif scope == 'quant.ack' %}{{t('oauth_scope_ack')}}{% elif scope == 'offline_access' %}{{t('oauth_scope_offline')}}{% else %}{{scope}}{% endif %}</li>
       {% endfor %}
     </ul>
     {% if current_binding %}<p class="error">{{t('oauth_replace', name=current_binding.name)}}</p>{% endif %}

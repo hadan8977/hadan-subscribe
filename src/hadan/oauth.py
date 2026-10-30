@@ -23,7 +23,7 @@ ACCESS_TTL = 3600
 REFRESH_TTL = 30 * 86400
 CODE_TTL = 300
 AUTHORIZATION_TTL = 600
-SCOPES = ("quant.read", "quant.ack", "quant.checkout", "offline_access")
+SCOPES = ("quant.read", "quant.ack", "offline_access")
 _PKCE_CHARS = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 
 

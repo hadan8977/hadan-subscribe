@@ -508,7 +508,6 @@ COPY.update({
  'oauth_requesting': ('请求连接', 'Requesting connection'),
  'oauth_scope_read': ('读取你的 Quant 报告、事件和附件', 'Read your Quant reports, events and attachments'),
  'oauth_scope_ack': ('将已处理的更新标记为已完成', 'Mark updates as processed'),
- 'oauth_scope_checkout': ('生成你本人在网页确认过的一次性付款二维码（不会扣款）', 'Prepare one payment QR code you approved on the website (never charges you)'),
  'oauth_scope_offline': ('在你关闭连接前保持访问', 'Stay connected until you revoke access'),
  'oauth_replace': ('确认后会替换当前 Agent 连接：{name}', 'Your current agent connection will be replaced: {name}'),
  'oauth_agent_enable': ('确认后会建立 Agent 连接；Agent 交付仍由你在账户中控制。邮件设置不受影响。', 'Approving connects the agent; agent delivery remains under your control in the account. Email settings are unchanged.'),

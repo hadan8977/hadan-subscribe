@@ -1024,16 +1024,9 @@ def create_app(settings=None):
         if b is not None and b.get("oauth_scope") is not None:
             scopes = set((b.get("oauth_scope") or "").split())
             if method == "tools/call":
-                if checkout_tool:
-                    # Existing connectors may still hold a quant.read token.
-                    # The single-use owner permission is the real payment gate;
-                    # quant.checkout is the preferred least-privilege scope.
-                    if "quant.checkout" not in scopes and "quant.read" not in scopes:
-                        return mcp_tool_challenge(identifier)
-                else:
-                    required = "quant.ack" if requested_tool == "ack_event" else "quant.read"
-                    if required not in scopes:
-                        return mcp_tool_challenge(identifier)
+                required = "quant.ack" if requested_tool == "ack_event" else "quant.read"
+                if required not in scopes:
+                    return mcp_tool_challenge(identifier)
             elif method in ("events/subscribe", "events/unsubscribe") and "quant.read" not in scopes:
                 return mcp_tool_challenge(identifier)
         tools = [
@@ -1083,7 +1076,7 @@ def create_app(settings=None):
                     "idempotentHint": True,
                     "openWorldHint": False,
                 },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.checkout"]}],
+                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
             },
             {
                 "name": "get_checkout_status",
@@ -1099,7 +1092,7 @@ def create_app(settings=None):
                     "idempotentHint": True,
                     "openWorldHint": False,
                 },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.checkout"]}],
+                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
             },
             {
                 "name": "get_checkout_qr",
@@ -1115,7 +1108,7 @@ def create_app(settings=None):
                     "idempotentHint": True,
                     "openWorldHint": False,
                 },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.checkout"]}],
+                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
             },
             {
                 "name": "list_events",
