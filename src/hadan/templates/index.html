@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block extra_head %}<link rel="stylesheet" href="/static/landing.css">{% endblock %}
+{% block body %}
+<section class="landing-hero" aria-labelledby="landing-heading">
+<div class="landing-intro">
+  <h1 id="landing-heading"><span data-i18n="landing_title_first">{{t('landing_title_first')}}</span><span data-i18n="landing_title">{{t('landing_title')}}</span></h1>
+  <p data-i18n="landing_description">{{t('landing_description')}}</p>
+  <div class="landing-actions"><a class="landing-cta" href="/app?flow=subscribe" data-subscribe-entry><span data-i18n="landing_subscribe">{{t('landing_subscribe')}}</span><span aria-hidden="true">↗</span></a><button type="button" id="copy-agent-prompt" class="agent-copy"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="6.5" y="6.5" width="10" height="10" rx="1.5"></rect><path d="M13.5 6V3.5H3.5v10H6"></path></svg><span data-i18n="copy_agent_prompt">{{t('copy_agent_prompt')}}</span></button></div>
+  <textarea id="agent-prompt-text" data-fallback="true" class="prompt-fallback" readonly hidden aria-label="{{t('agent_prompt_label')}}" data-i18n-aria-label="agent_prompt_label"></textarea>
+</div>
+<section class="delivery-scene" aria-label="{{t('landing_example')}}" data-i18n-aria-label="landing_example">
+  <fieldset class="sample-switch">
+    <legend class="visually-hidden" data-i18n="landing_channel_preview">{{t('landing_channel_preview')}}</legend>
+    <input type="radio" name="sample-channel" id="sample-email" value="email" checked>
+    <input type="radio" name="sample-channel" id="sample-agent" value="agent">
+    <div class="sample-toolbar">
+      <div class="channel-control">
+        <span class="channel-thumb" aria-hidden="true"></span>
+        <label for="sample-email"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"></rect><path d="m3 5 7 5.5L17 5"></path></svg><span data-i18n="email_short">{{t('email_short')}}</span></label>
+        <label for="sample-agent"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="6" width="14" height="11" rx="3"></rect><path d="M10 3v3M1.5 10v3m17-3v3M7 14h6"></path><circle cx="7" cy="10.5" r=".7" fill="currentColor" stroke="none"></circle><circle cx="13" cy="10.5" r=".7" fill="currentColor" stroke="none"></circle><circle cx="10" cy="2.5" r="1"></circle></svg><span>Agent</span></label>
+      </div>
+    </div>
+    <div class="sample-stage">
+      <div class="sample-email-view">
+        <a class="report-image-link" href="/static/quant-sample.png" target="_blank" rel="noopener" aria-label="{{t('landing_open_image')}}" data-i18n-aria-label="landing_open_image"><picture><source media="(max-width:500px)" srcset="/static/quant-sample-mobile.png"><img src="/static/quant-sample-preview.png" width="1248" height="860" alt="{{t('landing_image_alt')}}" data-i18n-alt="landing_image_alt" fetchpriority="high"></picture></a>
+      </div>
+      <article class="sample-agent-view">
+        <div class="agent-report-meta"><span>Quant / Agent</span><span>28 OCT 2026</span></div>
+        <h2>Portfolio rebalanced</h2>
+        <p class="agent-report-description">1 added · 1 removed · 1 score change</p>
+        <div class="agent-change"><span data-i18n="landing_added">{{t('landing_added')}}</span><div><strong>SMPB</strong><p>Sample Health · Healthcare</p></div></div>
+        <div class="agent-change"><span data-i18n="landing_removed">{{t('landing_removed')}}</span><div><strong>SMPD</strong><p>Sample Networks · Technology</p></div></div>
+        <div class="agent-change"><span data-i18n="landing_score">{{t('landing_score')}}</span><div><strong>SMPA <span class="score-before">8.10</span> → 8.42</strong><p>Sample Systems · Technology</p></div></div>
+      </article>
+    </div>
+  </fieldset>
+  <div class="mail-files">
+    <a href="/static/quant-sample.xlsx" download="Quant_2026-10-28.xlsx">
+      <span class="file-thumb sheet-thumb" aria-hidden="true"><svg viewBox="0 0 52 60" fill="none"><rect x=".5" y=".5" width="51" height="59" rx="3" fill="white" stroke="#d9e0e3"></rect><path d="M1 11h50v11H1z" fill="#e9efed"></path><path d="M1 11h50M1 22h50M1 32h50M1 42h50M1 52h50M18 11v48M36 11v48" stroke="#d9e0e3" stroke-width=".7"></path><g fill="#54635f" font-family="sans-serif" font-size="4.5"><text x="4" y="7">PORTFOLIO</text><text x="4" y="18">Symbol</text><text x="21" y="18">Price</text><text x="39" y="18">Score</text><text x="4" y="29">SMPA</text><text x="21" y="29">52.40</text><text x="39" y="29">8.42</text><text x="4" y="39">SMPB</text><text x="21" y="39">38.60</text><text x="39" y="39">7.65</text></g></svg></span>
+      <span class="file-details"><strong data-i18n="landing_file_sheet">{{t('landing_file_sheet')}}</strong><small>10 KB</small></span><span class="download-mark" aria-hidden="true">↓</span>
+    </a>
+    <a href="/static/quant-sample.png" download="Portfolio_2026-10-28.png">
+      <span class="file-thumb image-thumb" aria-hidden="true"><img src="/static/quant-sample-preview.png" width="52" height="60" alt="" loading="lazy"></span>
+      <span class="file-details"><strong data-i18n="landing_file_image">{{t('landing_file_image')}}</strong><small>219 KB</small></span><span class="download-mark" aria-hidden="true">↓</span>
+    </a>
+  </div>
+</section>
+</section>
+<section class="landing-answers" aria-label="{{t('home_questions')}}" data-i18n-aria-label="home_questions">
+  {% for question,answer in [('faq_content','landing_answer_content'),('home_question_start','landing_answer_start'),('faq_control','landing_answer_control')] %}<div><h2 data-i18n="{{question}}">{{t(question)}}</h2><p data-i18n="{{answer}}">{{t(answer)}}</p></div>{% endfor %}
+</section>
+{% endblock %}

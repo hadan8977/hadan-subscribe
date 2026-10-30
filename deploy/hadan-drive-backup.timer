@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily private Quant backup upload
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

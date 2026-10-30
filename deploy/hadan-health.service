@@ -1,0 +1,13 @@
+[Unit]
+Description=Independent Hadan liveness and backlog check
+[Service]
+Type=oneshot
+User=hadan
+Group=hadan
+WorkingDirectory=/opt/quant-subscribe/current
+EnvironmentFile=/etc/quant-subscribe/hadan.env
+Environment=PYTHONPATH=/opt/quant-subscribe/current/src
+ExecStart=/opt/quant-subscribe/current/.venv/bin/python -m hadan.cli check-health
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/quant-subscribe

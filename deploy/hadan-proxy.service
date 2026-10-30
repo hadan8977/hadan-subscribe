@@ -1,0 +1,36 @@
+[Unit]
+Description=Quant isolated HTTPS entrance
+After=network-online.target hadan-web.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=hadan-proxy
+Group=hadan-proxy
+ExecStart=/opt/quant-subscribe/proxy/2.11.7/caddy run --config /etc/quant-subscribe-proxy/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+StateDirectory=quant-subscribe-proxy
+StateDirectoryMode=0700
+Environment=XDG_DATA_HOME=/var/lib/quant-subscribe-proxy
+Environment=XDG_CONFIG_HOME=/var/lib/quant-subscribe-proxy
+Environment=GOMEMLIMIT=128MiB
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quant-subscribe-proxy
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=192M
+TasksMax=64
+LimitNOFILE=4096
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

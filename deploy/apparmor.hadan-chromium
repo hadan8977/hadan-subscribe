@@ -1,0 +1,8 @@
+# Ubuntu 24.04 user-namespace permission for this root-managed Chromium only.
+# Systemd still confines the service; Chromium's own sandbox stays enabled.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile hadan-chromium /opt/quant-subscribe/browsers/chromium-*/chrome-linux64/chrome flags=(unconfined) {
+  userns,
+}

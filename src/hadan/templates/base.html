@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="{{lang}}" data-page="{{ self.page() }}">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title data-i18n="{% block title_key %}site_title{% endblock %}">{% block title %}{{t('site_title')}}{% endblock %}</title>
+  <link rel="alternate" type="text/markdown" href="/skill.md" title="Quant Agent Skill"><link rel="help" href="/llms.txt">
+  <meta name="description" content="{{t('site_description')}}" data-i18n-content="site_description">
+  <link rel="preload" href="/static/quant-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/static/style.css?v=20261030-formal">{% block extra_head %}{% endblock %}<script src="/static/app.js?v=20261030-agent3" defer></script>
+</head>
+<body data-page="{% block page %}home{% endblock %}">
+  <header class="top">
+    <a class="brand" href="/">Quant</a>
+    <nav aria-label="{{t('nav_label')}}" data-i18n-aria-label="nav_label">
+      <div class="languages" aria-label="{{t('language_label')}}" data-i18n-aria-label="language_label"><a href="{{language_url('zh-CN')}}" data-language="zh-CN" lang="zh-CN" {% if lang=='zh-CN' %}aria-current="true"{% endif %}>中文</a><span aria-hidden="true">/</span><a href="{{language_url('en')}}" data-language="en" lang="en" {% if lang=='en' %}aria-current="true"{% endif %}>EN</a></div>
+      <a class="nav-primary" href="/app" data-i18n="nav_login">{{t('nav_login')}}</a>
+    </nav>
+  </header>
+  <main>{% block body %}{% endblock %}</main>
+  <footer class="site-footer"><nav aria-label="{{t('legal_links')}}" data-i18n-aria-label="legal_links"><a href="/agent" data-i18n="agent_discovery">{{t('agent_discovery')}}</a><a href="/terms" data-i18n="terms_title">{{t('terms_title')}}</a><a href="/terms#refunds" data-i18n="refunds_title">{{t('refunds_title')}}</a></nav></footer>
+  <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="application/json" id="quant-i18n">{{ {'strings':ui_strings,'errors':ui_errors}|tojson }}</script>
+</body></html>

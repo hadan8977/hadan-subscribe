@@ -1,0 +1,9 @@
+# Replace quant.example.com with the user's own domain. Install only after checking existing 80/443 services.
+quant.example.com {
+    encode zstd gzip
+    request_body {
+        max_size 24MB
+    }
+    reverse_proxy 127.0.0.1:8097
+    # Access logging intentionally omitted: OTP, content and unsubscribe paths are private.
+}

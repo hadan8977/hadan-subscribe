@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block page %}demo{% endblock %}
+{% block body %}
+<article class="demo-conversation">
+  <header class="demo-heading"><p class="eyebrow">QUANT / AGENT</p><h1 data-i18n="demo_chat_title">{{t('demo_chat_title')}}</h1><p data-i18n="demo_chat_note">{{t('demo_chat_note')}}</p></header>
+  <div class="demo-controls"><div><label for="demo-capability" data-i18n="demo_capability">{{t('demo_capability')}}</label><select id="demo-capability"><option value="auto" data-i18n="demo_auto">{{t('demo_auto')}}</option><option value="ondemand" data-i18n="demo_ondemand">{{t('demo_ondemand')}}</option><option value="browse" data-i18n="demo_browse">{{t('demo_browse')}}</option></select></div><div><label for="demo-language" data-i18n="demo_language">{{t('demo_language')}}</label><select id="demo-language"><option value="auto" data-i18n="demo_follow">{{t('demo_follow')}}</option><option value="zh-CN">中文</option><option value="en">English</option><option value="es">Español</option></select></div></div>
+  <ol id="demo-transcript" class="demo-transcript" aria-live="polite"></ol>
+  <div class="demo-conversation-actions"><button id="demo-next" class="button" type="button"></button><button id="demo-reset" class="text-button" type="button" data-i18n="demo_restart">{{t('demo_restart')}}</button></div>
+</article>
+{% endblock %}

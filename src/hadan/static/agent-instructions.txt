@@ -1,0 +1,184 @@
+Quant protocol reference
+Origin: {{BASE_URL}}
+Workflow and interaction rules: {{BASE_URL}}/skill.md
+Copyable English prompt: {{BASE_URL}}/agent/prompt
+
+LANGUAGE
+Default to English for every piece of Quant service information: plans, prices, dates, statuses, errors, instructions and summaries. If the runtime provides a known non-English locale, conversational replies may use that language, but Quant service data and identifiers stay English. If no locale is available, reply in English.
+
+CURRENT OFFER
+Fetch {{BASE_URL}}/api/purchase-options for the live plan, price, payment methods and access end date. Do not hard-code a price or date from this reference. Payment is owner-only.
+
+PUBLIC URLS AND CREDENTIALS
+Public URLs below contain no credential. JSON POST requests use Content-Type: application/json unless a form encoding is specified. Agent content requests use Authorization: Bearer <private credential>. Store a device credential only in the client's secure secret facility; never put it in a URL, public prompt, transcript or ordinary log.
+
+CONNECTION CHOICE
+1. MCP Events: preferred automatic transport when the platform supports MCP Events. The server receives a callback URL and signing secret and pushes report events.
+2. MCP Tools: authenticated on-demand tools over MCP.
+3. HTTPS API: pairing plus a device credential for clients that can store it securely and schedule work.
+4. Email: an independent delivery channel controlled by the owner.
+
+MCP Tools alone does not provide a timer or background wakeup. MCP Events availability depends on the client and platform; do not claim it without a successful `events/subscribe`.
+
+OAUTH FOR REMOTE MCP CLIENTS
+Discovery:
+  GET {{BASE_URL}}/.well-known/oauth-protected-resource
+  GET {{BASE_URL}}/.well-known/oauth-authorization-server
+  Resource: {{BASE_URL}}/mcp
+  Authorization server: {{BASE_URL}}
+  PKCE S256 is required.
+  Dynamic client registration: POST {{BASE_URL}}/oauth/register
+  Authorization: GET {{BASE_URL}}/oauth/authorize
+  Token: POST {{BASE_URL}}/oauth/token (authorization_code or refresh_token; form encoded)
+  Revocation: POST {{BASE_URL}}/oauth/revoke
+The owner verifies their email and approves the connection in the browser. The OAuth access token is bound to the owner's active Quant agent connection; revoking that connection invalidates the token. Do not ask the owner to copy a token into the conversation.
+
+MCP
+POST {{BASE_URL}}/mcp
+  Stateless Streamable HTTP. Authorization: Bearer <OAuth access token or device credential>.
+  Protocol discovery: server/discover
+    Returns resultType=complete, supportedVersions [2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05], capabilities {tools, events}.
+  Legacy initialize is also supported.
+  Tools:
+    get_subscription_status()
+    get_scan_schedule()
+    prepare_checkout()
+    get_checkout_status()
+    get_checkout_qr()
+    list_events(after optional)
+    read_content(content_id, version optional)
+    read_attachment(attachment_id)
+    ack_event(event_id)
+  get_subscription_status is available with a valid credential even before purchase. It returns the subscription state, live plans and the owner-only subscribe_url; it never changes billing or delivery preferences.
+  get_scan_schedule returns upcoming scan times plus an explicit check plan: at most three checks per scan, at scan + 10, +20 and +30 minutes. Poll only inside those listed windows. Do not run a 24/7 every-10-minute loop; between scans there is nothing to fetch. If the runtime only supports a fixed interval, gate each run by check_window_start_utc/check_window_end_utc and skip runs outside the windows. If no pending events, do not notify the owner.
+  prepare_checkout, get_checkout_status and get_checkout_qr only work after the owner approves a single-use QR checkout on the website. They never charge, change the plan or accept terms.
+  read_attachment returns a private base64 embedded resource. No subscription mutation, admin or spending tools are exposed; checkout tools only prepare an owner-approved QR and never charge.
+
+MCP EVENTS
+Event name: quant.report.published
+Description: A new, revised, or withdrawn Quant report is available.
+Delivery mode: webhook.
+Filter arguments: {"product_id":"quantgt"} (optional; quantgt is the only product).
+
+events/list
+  Returns:
+  {"events":[{"name":"quant.report.published",
+              "description":"A new, revised, or withdrawn Quant report is available.",
+              "delivery":["webhook"],
+              "inputSchema":{"type":"object","properties":{"product_id":{"type":"string","enum":["quantgt"]}},"additionalProperties":false},
+              "payloadSchema":{...}}]}
+
+events/subscribe
+  Params:
+  {"name":"quant.report.published",
+   "arguments":{"product_id":"quantgt"},
+   "delivery":{"mode":"webhook","url":"https://client.example/callback","secret":"whsec_<base64>"},
+   "ttlMs":2592000000,
+   "cursor":null}
+  The secret must start with whsec_ and decode to 24-64 bytes. The callback must be HTTPS, public, and must not use credentials or a fragment. Before any private event, the server sends a signed verification request:
+  {"type":"verification","challenge":"<single-use>"}
+  with headers webhook-id, webhook-timestamp, webhook-signature, X-MCP-Subscription-Id. The client must return 2xx and echo {"challenge":"<same value>"}.
+  Returns:
+  {"id":"sub_...","refreshBefore":"2026-...Z","cursor":null,"truncated":false}
+  Subscription creation is idempotent for the same owner, callback URL, event name and arguments. Refresh before refreshBefore by calling events/subscribe again. A failed callback verification returns JSON-RPC error -32015 CallbackEndpointError with data.reason.
+
+events/unsubscribe
+  Params: name, arguments, delivery {mode:"webhook", url}. Idempotent. Returns {}.
+
+Event delivery
+  One POST per event, maximum 256 KiB. Headers:
+    Content-Type: application/json
+    webhook-id: eventId
+    webhook-timestamp: Unix seconds
+    webhook-signature: Standard Webhooks signature
+    X-MCP-Subscription-Id: subscription id
+  Body:
+  {"eventId":"evt_...","name":"quant.report.published","timestamp":"2026-...Z",
+   "data":{"event_id":"...","content_id":"...","version":1,
+           "title":"...","summary":"...","change_type":"published|revised|withdrawn",
+           "withdrawn":false,"published_at":"2026-...Z",
+           "url":"{{BASE_URL}}/read/<content_id>"}}
+  Sign the exact body bytes. Standard Webhooks signature:
+    v1,base64(HMAC-SHA256(secret_bytes, webhook_id + "." + timestamp + "." + raw_body))
+  Deduplicate by eventId. A 2xx acknowledges receipt; processing is asynchronous. Events may arrive out of order. After receiving an event, use read_content and read_attachment, verify file size and SHA256, then acknowledge with ack_event.
+
+PAIRING (HTTPS API)
+POST /api/agent/pair
+  JSON: {"name":"Recognizable agent name","mode":"poll"}
+  Returns: pair_id, device_secret, user_code, verification_uri, expires_in (600 seconds).
+  Show verification_uri to the owner; the link carries the code, so the owner never types it. Creation supports polling only; manual webhook setup has been removed from the website.
+GET /api/pair/details?code=<8-hex-user-code>
+  Verified human session only. Returns name and expires_at before approval; no secrets.
+POST /api/pair/approve
+  Verified human session + CSRF, JSON {"code":"8-hex-user-code"}. The owner reviews scope and replacement before approving.
+POST /api/agent/pair/status
+  JSON: {"pair_id":"...","device_secret":"..."}; returns state pending/approved and binding_id.
+  Poll at least 5 seconds apart, stop at expiry. Approval creates a pending credential; it does not activate the connection.
+
+STATUS AND TEST (HTTPS API, DEVICE CREDENTIAL)
+GET /api/agent/status
+  Device Bearer token, active or owner-approved pending binding. OAuth clients use the MCP get_subscription_status tool instead. Unapproved device secrets are rejected.
+  Returns:
+  {"binding":{"state":"pending|active","mode":"poll|webhook"},
+   "subscription":{"status":"none|active|expired|ended|pending","expires_at":null,
+                   "email_enabled":false,"agent_enabled":false},
+   "entitled":false,"ready":false}
+  expires_at is a UTC Unix timestamp or null. Only the owner's Quant subscription is represented; no email or other subscriber data is returned.
+  ready = active binding AND current Quant access AND agent delivery enabled. It does not attest that the client has a scheduler.
+GET /api/agent/schedule
+  Same device credential; OAuth clients use MCP get_scan_schedule. Returns upcoming content scans and exact checks_utc /
+  checks_asia_shanghai: at most three checks per scan, 10 minutes apart, inside each check window. Poll only those times;
+  never run a 24/7 every-10-minute loop. No pending event means no notification.
+GET /api/agent/test
+GET /api/agent/test-file
+POST /api/agent/test/complete
+  Save the real test body and file before completion. Webhooks must also pass the signed receiver test.
+  Completion activates this binding and revokes the previous default; existing subscriptions and pending receipts remain owned by the same person.
+
+CONTENT AND RECEIPTS
+GET /api/events?pending=true&limit=50
+  Returns events and next_cursor. Read pending events again after acknowledging a batch; no persistent cursor is needed for this mode.
+  Event fields include id, kind, content_id, version, summary, seq and processing_state.
+GET /api/content/{content_id}?version={version}
+  Returns original body and an attachments manifest containing id, name, size and sha256.
+GET /api/files/{attachment_id}
+  Download bytes; verify size and SHA256. Process all required files before acknowledging.
+POST /api/events/{event_id}/ack
+  Active Agent credential only. Returns {"state":"processed"}; HTTP receipt alone is not processing.
+  Account events have content_id=null: save their summary and acknowledge without fetching /api/content/null.
+  Withdrawal events revoke further content access: process the withdrawal itself, not a download that is now blocked.
+GET /api/library?limit=50
+  Lists currently authorized archived reports, including imported/baseline editions that generated no notifications.
+  Paginate with both next_before and next_before_id as before and before_id. Agent delivery opt-outs still apply.
+
+LEGACY OWNER-MANAGED WEBHOOKS
+The simplified website does not expose manual webhook setup. Use MCP Events, polling or on-demand reads. The following is compatibility reference only for an owner-managed existing binding:
+  Verify X-Hadan-Timestamp within 5 minutes and X-Hadan-Signature = v1=hex(HMAC-SHA256(signing_secret, timestamp + "." + raw_body)). Deduplicate X-Hadan-Event. Return 2xx only after durable receipt; fetch content and acknowledge completed processing separately. X-Hadan-* are compatibility protocol field names.
+
+RECOVERY
+401: stop revoked/invalid credentials. 403: check current access/channel settings, do not bypass them. 429: honor Retry-After or wait at least 60 seconds. Bound retries for read/status failures; reconcile an uncertain mutation instead of blindly repeating it.
+The owner activates/renews/redeems through {{BASE_URL}}/app?flow=subscribe and manages opt-outs through {{BASE_URL}}/app?view=connections. Agent credentials cannot pay, redeem, modify subscriptions, or restore disabled email.
+
+OWNER-APPROVED QR CHECKOUT (MCP OR HTTP)
+The owner must first open the subscribe URL, sign in, choose the plan and payment method, accept the current terms, and tick "Allow <agent> to prepare a QR checkout." That creates a single-use permission for this binding. The agent cannot choose or change the plan, amount, method, payer or period, and cannot accept terms for the owner.
+
+MCP tools:
+  prepare_checkout()
+    No arguments. Prepares the one owner-approved order and returns amount, currency, access_until, expires_at,
+    qr_available and a PNG QR image block. Show the image inline to the owner immediately.
+  get_checkout_status()
+    Read the same order. Poll no faster than every 5 seconds. paid=true is the only payment confirmation.
+  get_checkout_qr()
+    Return the current QR as a PNG image if the first image was not displayed.
+
+HTTP fallback:
+  POST /api/agent/checkout  JSON {} only. Returns the same fields plus qr_image (data:image/png;base64,...),
+    qr_download_url and no checkout_url when a QR is ready.
+  GET /api/agent/checkout
+    Same order status. If no order exists yet it returns status=authorized and permission_id; call prepare next.
+  GET /api/agent/checkout/qr
+    PNG bytes for the same order, using the device Bearer credential.
+
+Show the QR directly. Do not open a browser, cloud computer or the owner's checkout page when a QR is available; do not substitute a webpage screenshot. If the client cannot render MCP image content, download the PNG from get_checkout_qr or qr_download_url and send it as an image attachment. If QR generation is unavailable, only then give the owner the website link. These endpoints never execute payment, automatic renewal, redemption or refund.
+If the optional reference client is already installed and saved a pending credential, its complete-pair command resumes testing and activation; do not create a new pairing merely because the earlier connection test was interrupted.
+Official SDK/reference-client compatibility is tested separately; background execution depends on the specific client and version.

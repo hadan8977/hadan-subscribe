@@ -1,0 +1,33 @@
+[Unit]
+Description=Hadan admin MCP (member management)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hadan
+Group=hadan
+WorkingDirectory=/opt/quant-subscribe/current
+EnvironmentFile=/etc/quant-subscribe/hadan.env
+Environment=PYTHONPATH=/opt/quant-subscribe/current/src
+ExecStart=/opt/quant-subscribe/current/.venv/bin/python -m hadan.mcp_server --transport http --host 127.0.0.1 --port 8098
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quant-subscribe
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=1024
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

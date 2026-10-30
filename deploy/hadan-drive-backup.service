@@ -1,0 +1,29 @@
+[Unit]
+Description=Verify and copy encrypted Quant backups to private Google Drive
+After=network-online.target hadan-backup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hadan-drive
+Group=hadan-drive
+ExecStart=/usr/bin/python3 /opt/quant-subscribe/current/scripts/upload_backups.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/spool/quant-subscribe-backup
+ReadWritePaths=/var/lib/quant-subscribe-drive /var/lib/quant-subscribe-backup-status
+InaccessiblePaths=/etc/quant-subscribe /var/lib/quant-subscribe
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=192M
+TasksMax=32
+CPUQuota=50%
+TimeoutStartSec=1200
+Restart=on-failure
+RestartSec=900
+

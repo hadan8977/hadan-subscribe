@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title_key %}agent_page_title{% endblock %}{% block title %}{{t('agent_page_title')}}{% endblock %}{% block page %}agent{% endblock %}{% block body %}<article class="reader guide"><p class="eyebrow">QUANT / AGENT</p><h1 data-i18n="agent_page_heading">{{t('agent_page_heading')}}</h1><p class="lead" data-i18n="agent_page_copy">{{t('agent_page_copy')}}</p><textarea id="agent-prompt-text" class="prompt-guide" readonly aria-label="{{t('agent_prompt_label')}}" data-i18n-aria-label="agent_prompt_label"></textarea><button id="copy-agent-prompt" type="button" class="button" data-i18n="copy_agent_prompt">{{t('copy_agent_prompt')}}</button><ol class="steps">{% for step in ['one','two','three'] %}<li><h2 data-i18n="agent_step_{{step}}">{{t('agent_step_'+step)}}</h2><p data-i18n="agent_step_{{step}}_body">{{t('agent_step_'+step+'_body')}}</p></li>{% endfor %}</ol><p class="notice" data-i18n="agent_capability_note">{{t('agent_capability_note')}}</p><p><a class="text-link" href="/skill.md" data-i18n="agent_discovery">{{t('agent_discovery')}}</a></p><details><summary data-i18n="developer_steps">{{t('developer_steps')}}</summary><pre>POST /api/agent/pair
+POST /api/agent/pair/status
+
+Authorization: Bearer &lt;private credential&gt;
+GET  /api/agent/test
+GET  /api/agent/test-file
+POST /api/agent/test/complete
+GET  /api/events?pending=true
+GET  /api/content/{content_id}
+GET  /api/files/{attachment_id}
+POST /api/events/{event_id}/ack
+
+MCP: {{base_url}}/mcp
+OAuth discovery: {{base_url}}/.well-known/oauth-authorization-server
+MCP Events: quant.report.published (webhook)</pre><p data-i18n="webhook_note">{{t('webhook_note')}}</p></details><a class="button" href="/app?view=connections" data-i18n="connect_agent">{{t('connect_agent')}}</a></article>{% endblock %}

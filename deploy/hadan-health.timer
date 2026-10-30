@@ -1,0 +1,7 @@
+[Unit]
+Description=Check Hadan every two minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+[Install]
+WantedBy=timers.target

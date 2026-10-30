@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title_key %}terms_page_title{% endblock %}
+{% block title %}{{t('terms_page_title')}}{% endblock %}
+{% block page %}terms{% endblock %}
+{% block body %}
+<article class="reader legal-page">
+  <p class="eyebrow" data-i18n="terms_version">{{t('terms_version')}}</p>
+  <h1 data-i18n="terms_title">{{t('terms_title')}}</h1>
+  <section><h2 data-i18n="terms_content_heading">{{t('terms_content_heading')}}</h2><p data-i18n="terms_content_body">{{t('terms_content_body')}}</p></section>
+  <section><h2 data-i18n="investment_heading">{{t('investment_heading')}}</h2><p data-i18n="investment_body">{{t('investment_body')}}</p></section>
+  <section id="refunds"><h2 data-i18n="refunds_title">{{t('refunds_title')}}</h2><p class="legal-key" data-i18n="refunds_body">{{t('refunds_body')}}</p><p data-i18n="refunds_period">{{t('refunds_period')}}</p></section>
+  <section><h2 data-i18n="terms_control_heading">{{t('terms_control_heading')}}</h2><p data-i18n="terms_control_body">{{t('terms_control_body')}}</p></section>
+  <section><h2 data-i18n="terms_contact_heading">{{t('terms_contact_heading')}}</h2><p><span data-i18n="terms_contact_body">{{t('terms_contact_body')}}</span> <a class="text-link" href="mailto:owner@example.test">owner@example.test</a></p></section>
+</article>
+{% endblock %}

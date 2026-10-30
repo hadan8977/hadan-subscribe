@@ -1,0 +1,56 @@
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT OR IGNORE INTO meta VALUES ('schema_version','1');
+CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS access_allowlist(email TEXT PRIMARY KEY,note TEXT NOT NULL DEFAULT '',created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS otp(email TEXT PRIMARY KEY,digest TEXT NOT NULL,expires_at REAL NOT NULL,attempts INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY,start REAL NOT NULL,count INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions(digest TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS products(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',paid INTEGER NOT NULL DEFAULT 0,price_id TEXT,active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS subscriptions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),product_id TEXT NOT NULL REFERENCES products(id),status TEXT NOT NULL DEFAULT 'active',expires_at REAL,email_enabled INTEGER NOT NULL DEFAULT 1,agent_enabled INTEGER NOT NULL DEFAULT 1,email_format TEXT NOT NULL DEFAULT 'summary',auto_renew INTEGER NOT NULL DEFAULT 0,cancel_requested INTEGER NOT NULL DEFAULT 0,cancel_request_id TEXT,billing_id TEXT UNIQUE,created_at REAL NOT NULL,UNIQUE(user_id,product_id));
+CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,mode TEXT NOT NULL CHECK(mode IN ('poll','webhook')),endpoint TEXT,state TEXT NOT NULL DEFAULT 'pending',token_digest TEXT NOT NULL UNIQUE,test_read INTEGER NOT NULL DEFAULT 0,test_download INTEGER NOT NULL DEFAULT 0,test_ok INTEGER NOT NULL DEFAULT 0,test_hook INTEGER NOT NULL DEFAULT 0,created_at REAL NOT NULL,last_seen REAL,failures INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX IF NOT EXISTS binding_default ON bindings(user_id) WHERE state='active';
+CREATE TABLE IF NOT EXISTS pairings(id TEXT PRIMARY KEY,code TEXT NOT NULL UNIQUE,secret_digest TEXT NOT NULL,name TEXT NOT NULL,mode TEXT NOT NULL,endpoint TEXT,binding_id TEXT REFERENCES bindings(id),expires_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS contents(id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES products(id),source_key TEXT NOT NULL,current_version INTEGER NOT NULL,withdrawn INTEGER NOT NULL DEFAULT 0,created_at REAL NOT NULL,UNIQUE(product_id,source_key));
+CREATE TABLE IF NOT EXISTS versions(id TEXT PRIMARY KEY,content_id TEXT NOT NULL REFERENCES contents(id),number INTEGER NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,html TEXT NOT NULL DEFAULT '',changes TEXT NOT NULL DEFAULT '',fingerprint TEXT NOT NULL,created_at REAL NOT NULL,UNIQUE(content_id,number));
+CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,version_id TEXT NOT NULL REFERENCES versions(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,storage_key TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,seq INTEGER NOT NULL UNIQUE,product_id TEXT NOT NULL REFERENCES products(id),content_id TEXT REFERENCES contents(id),version_id TEXT REFERENCES versions(id),kind TEXT NOT NULL,summary TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS receipts(user_id TEXT NOT NULL REFERENCES users(id),event_id TEXT NOT NULL REFERENCES events(id),state TEXT NOT NULL DEFAULT 'pending',processed_at REAL,binding_id TEXT,PRIMARY KEY(user_id,event_id));
+CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,event_id TEXT NOT NULL REFERENCES events(id),user_id TEXT NOT NULL REFERENCES users(id),channel TEXT NOT NULL,binding_id TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'queued',provider_id TEXT,error TEXT,attempts INTEGER NOT NULL DEFAULT 0,created_at REAL NOT NULL,updated_at REAL NOT NULL,UNIQUE(event_id,user_id,channel,binding_id));
+CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,queue TEXT NOT NULL DEFAULT 'main',payload TEXT NOT NULL,dedupe TEXT NOT NULL UNIQUE,state TEXT NOT NULL DEFAULT 'queued',available_at REAL NOT NULL,lease_until REAL,lease_token TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(queue,state,available_at);
+CREATE TABLE IF NOT EXISTS incidents(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,summary TEXT NOT NULL,details TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'open',count INTEGER NOT NULL DEFAULT 1,created_at REAL NOT NULL,updated_at REAL NOT NULL,diagnosis TEXT);
+CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,object_id TEXT NOT NULL,details TEXT NOT NULL DEFAULT '{}',created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS payments(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),product_id TEXT NOT NULL REFERENCES products(id),provider_event TEXT UNIQUE,amount INTEGER NOT NULL DEFAULT 0,currency TEXT NOT NULL DEFAULT 'usd',created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS billing_events(id TEXT PRIMARY KEY,received_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS source_state(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS heartbeats(name TEXT PRIMARY KEY,updated_at REAL NOT NULL,details TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS suppressions(email TEXT PRIMARY KEY,reason TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS ses_feedback(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '',payload_digest TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS directmail_feedback(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '',recipient TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '',detail TEXT NOT NULL DEFAULT '',created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS directmail_feedback_message ON directmail_feedback(message_id,event_type);
+CREATE INDEX IF NOT EXISTS ses_feedback_message ON ses_feedback(message_id,event_type);
+CREATE TABLE IF NOT EXISTS delivery_preferences(subscription_id TEXT PRIMARY KEY REFERENCES subscriptions(id),email_policy TEXT NOT NULL DEFAULT 'always');
+
+CREATE INDEX IF NOT EXISTS jobs_delivery ON jobs(json_extract(payload,'$.delivery_id'));
+
+CREATE TABLE IF NOT EXISTS code_batches(id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES products(id),days INTEGER NOT NULL,quantity INTEGER NOT NULL,expires_at REAL,created_by TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS redemption_codes(digest TEXT PRIMARY KEY,batch_id TEXT NOT NULL REFERENCES code_batches(id),state TEXT NOT NULL DEFAULT 'active',redeemed_by TEXT REFERENCES users(id),redeemed_at REAL,created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS codes_batch ON redemption_codes(batch_id,state);
+CREATE TABLE IF NOT EXISTS purchase_orders(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),product_id TEXT NOT NULL REFERENCES products(id),plan_id TEXT NOT NULL,days INTEGER NOT NULL,amount_minor INTEGER NOT NULL,currency TEXT NOT NULL,method TEXT NOT NULL,provider TEXT NOT NULL,remote_id TEXT UNIQUE,status TEXT NOT NULL,qr_data TEXT,created_at REAL NOT NULL,expires_at REAL NOT NULL,paid_at REAL);
+CREATE INDEX IF NOT EXISTS orders_owner ON purchase_orders(user_id,created_at);
+CREATE TABLE IF NOT EXISTS purchase_details(order_id TEXT PRIMARY KEY REFERENCES purchase_orders(id),access_until REAL,app_id TEXT NOT NULL,request_body TEXT NOT NULL,request_id TEXT NOT NULL,pay_url TEXT);
+CREATE TABLE IF NOT EXISTS purchase_events(provider TEXT NOT NULL,event_id TEXT NOT NULL,order_id TEXT NOT NULL REFERENCES purchase_orders(id),body_digest TEXT NOT NULL,created_at REAL NOT NULL,PRIMARY KEY(provider,event_id));
+CREATE TABLE IF NOT EXISTS checkout_permissions(id TEXT PRIMARY KEY,binding_id TEXT NOT NULL REFERENCES bindings(id),user_id TEXT NOT NULL REFERENCES users(id),plan_id TEXT NOT NULL,method TEXT NOT NULL,plan_snapshot TEXT NOT NULL,agreement_id TEXT NOT NULL,payer_ip TEXT NOT NULL,expires_at REAL NOT NULL,created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS purchase_refunds(provider TEXT NOT NULL,refund_id TEXT NOT NULL,order_id TEXT NOT NULL REFERENCES purchase_orders(id),amount_minor INTEGER NOT NULL,status TEXT NOT NULL,event_id TEXT NOT NULL,created_at REAL NOT NULL,PRIMARY KEY(provider,refund_id));
+
+CREATE TABLE IF NOT EXISTS oauth_clients(client_id TEXT PRIMARY KEY,client_name TEXT NOT NULL,redirect_uris TEXT NOT NULL,token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',created_at REAL NOT NULL,last_seen REAL);
+CREATE TABLE IF NOT EXISTS oauth_authorizations(id TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES oauth_clients(client_id),user_id TEXT REFERENCES users(id),redirect_uri TEXT NOT NULL,code_challenge TEXT NOT NULL,scope TEXT NOT NULL,resource TEXT NOT NULL,state TEXT NOT NULL DEFAULT '',created_at REAL NOT NULL,expires_at REAL NOT NULL,approved_at REAL,denied_at REAL);
+CREATE INDEX IF NOT EXISTS oauth_authorizations_expiry ON oauth_authorizations(expires_at);
+CREATE TABLE IF NOT EXISTS oauth_codes(digest TEXT PRIMARY KEY,authorization_id TEXT NOT NULL REFERENCES oauth_authorizations(id),client_id TEXT NOT NULL,user_id TEXT NOT NULL REFERENCES users(id),redirect_uri TEXT NOT NULL,code_challenge TEXT NOT NULL,scope TEXT NOT NULL,resource TEXT NOT NULL,expires_at REAL NOT NULL,used_at REAL);
+CREATE TABLE IF NOT EXISTS oauth_tokens(digest TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN ('access','refresh')),client_id TEXT NOT NULL,user_id TEXT NOT NULL REFERENCES users(id),binding_id TEXT NOT NULL REFERENCES bindings(id),scope TEXT NOT NULL,resource TEXT NOT NULL,expires_at REAL NOT NULL,created_at REAL NOT NULL,revoked_at REAL,rotated_from TEXT);
+CREATE INDEX IF NOT EXISTS oauth_tokens_binding ON oauth_tokens(binding_id,kind);
+CREATE INDEX IF NOT EXISTS oauth_tokens_expiry ON oauth_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS mcp_event_subscriptions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),binding_id TEXT NOT NULL REFERENCES bindings(id),name TEXT NOT NULL,arguments TEXT NOT NULL,callback_url TEXT NOT NULL,secret TEXT NOT NULL,cursor TEXT,refresh_before REAL NOT NULL,active INTEGER NOT NULL DEFAULT 1,created_at REAL NOT NULL,updated_at REAL NOT NULL,last_error TEXT);
+CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_user ON mcp_event_subscriptions(user_id,active);
+CREATE TABLE IF NOT EXISTS mcp_event_deliveries(id TEXT PRIMARY KEY,subscription_id TEXT NOT NULL REFERENCES mcp_event_subscriptions(id),event_id TEXT NOT NULL REFERENCES events(id),state TEXT NOT NULL DEFAULT 'queued',attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at REAL NOT NULL,updated_at REAL NOT NULL,UNIQUE(subscription_id,event_id));

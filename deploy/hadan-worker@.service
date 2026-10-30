@@ -1,0 +1,35 @@
+[Unit]
+Description=Hadan %i worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hadan
+Group=hadan
+WorkingDirectory=/opt/quant-subscribe/current
+EnvironmentFile=/etc/quant-subscribe/hadan.env
+EnvironmentFile=-/etc/quant-subscribe/%i.env
+Environment=PYTHONPATH=/opt/quant-subscribe/current/src
+ExecStart=/opt/quant-subscribe/current/.venv/bin/python -m hadan.cli worker --queue %i
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quant-subscribe
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=768M
+TasksMax=128
+LimitNOFILE=1024
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Encrypted Hadan backup and bounded housekeeping
+
+[Service]
+Type=oneshot
+User=hadan
+Group=hadan
+WorkingDirectory=/opt/quant-subscribe/current
+EnvironmentFile=/etc/quant-subscribe/hadan.env
+Environment=PYTHONPATH=/opt/quant-subscribe/current/src
+ExecStart=/opt/quant-subscribe/current/scripts/backup.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quant-subscribe
+ReadWritePaths=-/var/spool/quant-subscribe-backup
+MemoryMax=256M
+Restart=on-failure
+RestartSec=900
