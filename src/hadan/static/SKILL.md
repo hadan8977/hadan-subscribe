@@ -33,7 +33,7 @@ MCP Tools alone is on-demand access; it does not schedule work. Use polling only
 
 Check for an existing connection to this exact service origin. If one exists, verify its status and subscription access before creating another pairing. Reuse valid authorization. Do not create duplicate subscriptions or silently replace an existing agent connection.
 
-If access is missing or expired, use the `get_subscription_status` MCP tool when connected; it returns the current status, the live plan and the owner-only `subscribe_url`. Send the owner to that URL (normally `{{BASE_URL}}/app?flow=subscribe`). If agent delivery is disabled, ask the owner to enable it at `{{BASE_URL}}/app?view=connections`. Never override an opt-out.
+If access is missing or expired, use the `get_subscription_status` MCP tool when connected; it returns the current status, the live plan and the owner-only `subscribe_url`. Send the owner to that URL (normally `{{BASE_URL}}/app?flow=subscribe`) and ask them to select the plan and payment method, accept the terms, and tick the checkbox allowing this agent to prepare the QR checkout. If agent delivery is disabled, ask the owner to enable it at `{{BASE_URL}}/app?view=connections`. Never override an opt-out.
 
 ## 4. Connect
 

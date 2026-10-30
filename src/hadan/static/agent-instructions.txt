@@ -49,7 +49,7 @@ POST {{BASE_URL}}/mcp
     read_content(content_id, version optional)
     read_attachment(attachment_id)
     ack_event(event_id)
-  get_subscription_status is available with a valid credential even before purchase. It returns the subscription state, live plans and the owner-only subscribe_url; it never changes billing or delivery preferences.
+  get_subscription_status is available with a valid credential even before purchase. It returns the subscription state, live plans and the owner-only subscribe_url; it never changes billing or delivery preferences. If the owner needs to buy or renew, send them to subscribe_url and ask them to choose the plan/method, accept the terms, and tick the checkbox allowing this agent to prepare the QR checkout.
   get_scan_schedule returns upcoming scan times plus an explicit check plan: at most three checks per scan, at scan + 10, +20 and +30 minutes. Poll only inside those listed windows. Do not run a 24/7 every-10-minute loop; between scans there is nothing to fetch. If the runtime only supports a fixed interval, gate each run by check_window_start_utc/check_window_end_utc and skip runs outside the windows. If no pending events, do not notify the owner.
   prepare_checkout, get_checkout_status and get_checkout_qr only work after the owner approves a single-use QR checkout on the website. They never charge, change the plan or accept terms.
   read_attachment returns a private base64 embedded resource. No subscription mutation, admin or spending tools are exposed; checkout tools only prepare an owner-approved QR and never charge.
