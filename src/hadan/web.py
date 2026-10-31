@@ -1551,7 +1551,18 @@ def create_app(settings=None):
     def purchase_options():
         from .commerce import Commerce
         from .terms import TERMS_VERSION
-        return {**Commerce(s).options(), "terms_version": TERMS_VERSION, "terms_url": cfg.base_url.rstrip("/") + "/terms"}
+
+        options = Commerce(s).options()
+        return {
+            **options,
+            "terms_version": TERMS_VERSION,
+            "terms_url": cfg.base_url.rstrip("/") + "/terms",
+            "agent_payment_methods": [
+                item["id"]
+                for item in options["methods"]
+                if item["enabled"] and item["id"] in ("wechat", "alipay")
+            ],
+        }
 
     @app.post("/api/redeem")
     async def redeem(request: Request):

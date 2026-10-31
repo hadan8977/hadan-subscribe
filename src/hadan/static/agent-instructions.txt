@@ -7,7 +7,7 @@ LANGUAGE
 Default to English for every piece of Quant service information: plans, prices, dates, statuses, errors, instructions and summaries. If the runtime provides a known non-English locale, conversational replies may use that language, but Quant service data and identifiers stay English. If no locale is available, reply in English.
 
 CURRENT OFFER
-Fetch {{BASE_URL}}/api/purchase-options for the live plan, price, payment methods and access end date. Do not hard-code a price or date from this reference. Payment is owner-only.
+Fetch {{BASE_URL}}/api/purchase-options for the live plans, price, agent_payment_methods, terms_version, terms_url and access end date. Do not hard-code a price or date from this reference. Payment is owner-only.
 
 PUBLIC URLS AND CREDENTIALS
 Public URLs below contain no credential. JSON POST requests use Content-Type: application/json unless a form encoding is specified. Agent content requests use Authorization: Bearer <private credential>. Store a device credential only in the client's secure secret facility; never put it in a URL, public prompt, transcript or ordinary log.
