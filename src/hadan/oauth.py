@@ -240,6 +240,12 @@ class OAuth:
         granted = [x for x in requested if x in SCOPES]
         if not granted:
             granted = list(SCOPES)
+        # MCP connectors must survive beyond the one-hour access-token window.
+        # Grant offline access with any Quant read/ack authorization so the
+        # token endpoint can issue a rotating refresh token even when a client
+        # omits offline_access from its authorization request.
+        if "offline_access" not in granted and set(granted) & {"quant.read", "quant.ack"}:
+            granted.append("offline_access")
         return " ".join(dict.fromkeys(granted))
 
     def start(self, params, ip: str) -> str:

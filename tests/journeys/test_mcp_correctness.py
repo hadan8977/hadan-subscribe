@@ -276,8 +276,8 @@ def test_oauth_scope_and_refresh_contract(journey):
         "https://chatgpt.com/connector/oauth/read-only",
         scope="quant.read",
     )
-    assert read_only["scope"] == "quant.read"
-    assert "refresh_token" not in read_only
+    assert "offline_access" in read_only["scope"].split()
+    assert read_only["refresh_token"]
     missing_refresh = owner.post(
         "/oauth/token",
         data={
@@ -311,8 +311,8 @@ def test_oauth_scope_and_refresh_contract(journey):
     assert rotated.json()["refresh_token"] != offline["refresh_token"]
     assert rotated.json()["scope"] == offline["scope"]
 
-    # An omitted scope uses the server default (including offline_access);
-    # explicitly read-only scope must never be silently upgraded.
+    # An omitted scope uses the server default; explicit Quant scopes also
+    # receive offline_access so MCP connectors can rotate refresh tokens.
     omitted, omitted_info = oauth_access(
         journey,
         owner,

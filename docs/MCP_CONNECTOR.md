@@ -156,8 +156,10 @@ handoff.
 
 Scopes are `quant.read`, `quant.ack` and `offline_access`. The QR helpers use
 `quant.read`; the server fixes the plan/amount and the owner's payment remains
-the final gate. A refresh token is issued only when `offline_access` was
-granted, and refresh tokens rotate. The OAuth
+the final gate. Quant grants `offline_access` alongside any `quant.read` or
+`quant.ack` authorization, even if the client omitted it, so MCP connectors
+receive a rotating refresh token and survive the one-hour access-token window.
+Existing connections created before this behavior must reauthorize once. The OAuth
 `resource` value is validated against `https://quant.example.com/mcp` (the bare
 origin is accepted for compatibility clients).
 
