@@ -101,6 +101,21 @@ class OAuth:
         "https://claude.ai/api/mcp/auth_callback",
     }
 
+    _AUTO_HOSTS = {"chatgpt.com", "chat.openai.com", "grok.com", "www.cursor.com", "claude.ai"}
+
+    def auto_approve_allowed(self, redirect_uri: str) -> bool:
+        """Only first-party HTTPS connector callbacks may skip the consent page.
+
+        Loopback and custom-scheme clients still need an explicit approval;
+        they are local applications where an automatic grant is harder to
+        attribute to the owner's intent.
+        """
+        try:
+            parts = urlsplit(redirect_uri)
+        except ValueError:
+            return False
+        return parts.scheme == "https" and parts.hostname in self._AUTO_HOSTS
+
     def _redirect_allowed(self, uri: str) -> bool:
         if not isinstance(uri, str) or len(uri) > 2048 or "\r" in uri or "\n" in uri:
             return False

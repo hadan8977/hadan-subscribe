@@ -377,13 +377,14 @@ def create_app(settings=None):
         # button. Replacing an existing active connection still asks.
         oauth_request_id = p.get("oauth_request_id")
         if isinstance(oauth_request_id, str) and oauth_request_id:
-            if active:
-                result["oauth_requires_approval"] = True
-            else:
-                try:
+            try:
+                authorization = oauth.request(oauth_request_id)
+                if active or not oauth.auto_approve_allowed(authorization["redirect_uri"]):
+                    result["oauth_requires_approval"] = True
+                else:
                     result["oauth_redirect"] = oauth.approve(oauth_request_id, me["id"])
-                except OAuthError as exc:
-                    result["oauth_error"] = exc.description or exc.error
+            except OAuthError as exc:
+                result["oauth_error"] = exc.description or exc.error
         pair_code = p.get("pair_code")
         if isinstance(pair_code, str) and pair_code:
             if active:
@@ -859,7 +860,7 @@ def create_app(settings=None):
         # connection, finish the authorization without a second consent click.
         # Replacing an existing active connection, or an explicit manual link,
         # still shows the review page.
-        if current and not active and request.query_params.get("manual") != "1":
+        if current and not active and request.query_params.get("manual") != "1" and oauth.auto_approve_allowed(row["redirect_uri"]):
             try:
                 return RedirectResponse(oauth.approve(request_id, current["id"]), 303)
             except OAuthError:

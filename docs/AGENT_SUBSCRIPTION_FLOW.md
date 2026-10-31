@@ -50,7 +50,7 @@ Agent 侧获取的 Quant 信息必须全英文，包括方案名、价格、日�
 ### OAuth / MCP 客户端（ChatGPT、Grok、Cursor 等）
 
 1. 添加远程 MCP connector，URL 为 `https://quant.example.com/mcp`；让平台走 OAuth discovery + DCR，不手填 OIDC/Authorize/Token 地址。
-2. 浏览器内验证 owner 邮箱。首次连接会自动完成授权，不需要再点同意；替换现有连接时才会再次确认。OAuth token 由平台保存，不进入对话上下文。
+2. 浏览器内验证 owner 邮箱。支持的远程连接器（ChatGPT、Grok、Cursor、Claude）首次连接会自动完成授权，不需要再点同意；loopback/自定义客户端以及替换现有连接时才会再次确认。OAuth token 由平台保存，不进入对话上下文。
 3. 若平台显示 `no_auth_link` 或无法弹授权卡片，不要声称已连接；立即回退到站点配对。首次连接在 owner 验证邮箱后自动完成，不需要再点配对授权。
 4. 调 `get_subscription_status`；它返回实时套餐、可用支付方式、`terms_version`、`terms_url` 和 `subscribe_url`。Agent 在对话里说明套餐、价格、支付方式和条款链接，请 owner 明确确认。
 5. Agent 调 `prepare_checkout`，传入 `plan_id`、`method`、`accept_terms=true`、`terms_version`（HTTP 客户端用 `POST /api/agent/checkout` 传同样 JSON）。服务端固定金额，不接受客户端金额或任意套餐。返回 PNG 二维码后直接把图片发给 owner；不要打开浏览器或云电脑，也不需要 owner 再去网页点授权按钮。客户端无法显示图片时用 `get_checkout_qr` / `GET /api/agent/checkout/qr` 下载后作为附件发送。

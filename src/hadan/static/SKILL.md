@@ -39,7 +39,7 @@ If access is missing or expired, use the `get_subscription_status` MCP tool when
 
 ### MCP OAuth (ChatGPT, Grok, Cursor and compatible clients)
 
-If the runtime supports remote MCP connectors, use `{{BASE_URL}}/mcp` with the OAuth discovery documents advertised by the service. The owner verifies their email in the browser; on a first connection the authorization completes automatically, with no separate consent click. Replacing an existing active connection still asks for confirmation. Do not ask for or paste a token. Server-side OAuth storage belongs to the platform; the model must not receive a long-lived secret.
+If the runtime supports remote MCP connectors, use `{{BASE_URL}}/mcp` with the OAuth discovery documents advertised by the service. The owner verifies their email in the browser; on a first connection from a supported remote connector (ChatGPT, Grok, Cursor, Claude) the authorization completes automatically, with no separate consent click. Loopback/custom clients and replacement of an existing active connection still ask for confirmation. Do not ask for or paste a token. Server-side OAuth storage belongs to the platform; the model must not receive a long-lived secret.
 
 If the platform cannot display the OAuth authorization card (for example it reports `no_auth_link`), do not claim the connector is connected. Fall back immediately to the site pairing flow below; it produces the same scoped credential and completes automatically after the owner verifies their email on a first connection.
 

@@ -53,9 +53,10 @@ Updated 2026-10-30. The public endpoint is `https://quant.example.com/mcp`.
    - Authentication: OAuth; leave client ID/secret empty so ChatGPT uses
      dynamic client registration.
 4. Click connect. The browser opens Quant's authorization page. Verify the
-   owner email. On a first connection the authorization completes
-   automatically, with no separate consent click. Replacing an existing active
-   connection still asks for confirmation. Agent delivery remains under the
+   owner email. On a first connection from a supported remote
+   connector (ChatGPT, Grok, Cursor or Claude) the authorization completes
+   automatically, with no separate consent click. Loopback/custom clients and
+   replacement of an existing active connection still ask for confirmation. Agent delivery remains under the
    owner's control on the account page.
 5. If the client cannot show an OAuth authorization card (`no_auth_link`), use
    the site pairing link instead. It is the supported fallback: the agent asks

@@ -31,7 +31,7 @@ Discovery:
   Authorization: GET {{BASE_URL}}/oauth/authorize
   Token: POST {{BASE_URL}}/oauth/token (authorization_code or refresh_token; form encoded)
   Revocation: POST {{BASE_URL}}/oauth/revoke
-The owner verifies their email in the browser. On a first connection the OAuth authorization completes automatically; no separate consent click is needed. Replacing an existing active connection still asks the owner to confirm. The OAuth access token is bound to the owner's active Quant agent connection; revoking that connection invalidates the token. Do not ask the owner to copy a token into the conversation.
+The owner verifies their email in the browser. On a first connection from a supported remote connector (ChatGPT, Grok, Cursor, Claude) the OAuth authorization completes automatically; no separate consent click is needed. Loopback/custom clients and replacement of an existing active connection still ask the owner to confirm. The OAuth access token is bound to the owner's active Quant agent connection; revoking that connection invalidates the token. Do not ask the owner to copy a token into the conversation.
 
 MCP
 POST {{BASE_URL}}/mcp
