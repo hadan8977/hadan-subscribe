@@ -1551,7 +1551,7 @@ def create_app(settings=None):
     def purchase_options():
         from .commerce import Commerce
         from .terms import TERMS_VERSION
-        return {**Commerce(s).options(), "terms_version": TERMS_VERSION}
+        return {**Commerce(s).options(), "terms_version": TERMS_VERSION, "terms_url": cfg.base_url.rstrip("/") + "/terms"}
 
     @app.post("/api/redeem")
     async def redeem(request: Request):
