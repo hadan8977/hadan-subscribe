@@ -25,7 +25,7 @@ Use the best transport the runtime actually supports, in this order:
 
 1. **MCP Events** — subscribe to `quant.report.published` through server-side webhook delivery. This is the preferred automatic path when the platform supports MCP Events. Once `events/subscribe` succeeds, use webhook delivery; do not also poll for the same event.
 2. **MCP Tools / HTTPS polling** — use polling only when webhook delivery is unavailable or a webhook delivery has permanently failed. Read and acknowledge each event once.
-3. **Email** — fallback channel. Do not repeat content already delivered by webhook or processed by polling; the server suppresses or delays fallback email when an agent has it.
+3. **Email** — an independent delivery channel; its timing is not changed by agent status. If you can read the owner's mailbox, use the email's `X-Quant-Event-ID` / `X-Quant-Content-ID` headers (or the `/read/<content_id>` link) as idempotency keys and do not report content already received via webhook or polling.
 
 MCP Tools alone is on-demand access; it does not schedule work. Use polling only when the runtime can securely store a credential and run a persistent schedule. If no supported persistent connection exists, offer on-demand access and email; do not start pairing merely to appear connected.
 

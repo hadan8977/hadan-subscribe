@@ -99,6 +99,17 @@ MCP Tools alone does not wake the model or schedule work. If MCP Events is not
 available, use a scheduler only at the returned check times and notify only
 when `list_events()` returns pending events. Email is independent.
 
+## Channel deduplication
+
+Webhook delivery is preferred. While a webhook delivery for an event is
+queued, retrying or accepted, `list_events()` hides that event for the same
+binding; polling is the fallback after a permanent webhook failure. Agents
+must treat `eventId`/`event_id` and `content_id` as idempotency keys across
+webhook, polling and email. Content emails include `X-Quant-Event-ID`,
+`X-Quant-Content-ID` and `X-Quant-Version` headers (and a `/read/<content_id>`
+link when applicable), so an agent with mailbox access can suppress a duplicate
+notification without changing email delivery timing.
+
 ## Email delivery
 
 Quant sends sign-in and report email from the public sender address shown on

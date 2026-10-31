@@ -27,19 +27,6 @@ class Worker:
         self.stopping = False
         self.last_heartbeat = 0.0
 
-    def _webhook_in_flight(self, db, user_id, event_id):
-        """True when the preferred MCP Events channel has this event."""
-        sql = (
-            "SELECT 1 FROM mcp_event_deliveries med "
-            "JOIN mcp_event_subscriptions mes ON mes.id=med.subscription_id "
-            "WHERE mes.user_id=? AND med.event_id=? "
-            "AND med.state IN ('queued','sending','accepted','retrying') LIMIT 1"
-        )
-        params = (user_id, event_id)
-        if db is self.db:
-            return bool(self.db.one(sql, params))
-        return bool(db.execute(sql, params).fetchone())
-
     def clean(self, value):
         text = str(value)
         for value in (
@@ -387,14 +374,12 @@ class Worker:
                 if s
                 else None
             )
-            if (not pref or pref["email_policy"] == "fallback") and s and s["agent_enabled"]:
+            if pref and pref["email_policy"] == "fallback" and s["agent_enabled"]:
                 r = self.db.one(
                     "SELECT state FROM receipts WHERE user_id=? AND event_id=?",
                     (d["user_id"], d["event_id"]),
                 )
-                if (r and r["state"] == "processed") or self._webhook_in_flight(
-                    self.db, d["user_id"], d["event_id"]
-                ):
+                if r and r["state"] == "processed":
                     skip = True
         else:
             b = self.db.one(
@@ -444,13 +429,12 @@ class Worker:
                     (d["user_id"], d["event_id"]),
                 ).fetchone()
                 if (
-                    (not pref or pref["email_policy"] == "fallback")
+                    pref
+                    and pref["email_policy"] == "fallback"
                     and fresh
                     and fresh["agent_enabled"]
-                    and (
-                        (receipt and receipt["state"] == "processed")
-                        or self._webhook_in_flight(db, d["user_id"], d["event_id"])
-                    )
+                    and receipt
+                    and receipt["state"] == "processed"
                 ):
                     allowed = False
             content = db.execute(
@@ -543,6 +527,11 @@ class Worker:
                     html=rich,
                     attachments=files,
                     unsubscribe=unsubscribe,
+                    headers={
+                        "X-Quant-Event-ID": d["event_id"],
+                        "X-Quant-Content-ID": d["content_id"] or "",
+                        "X-Quant-Version": str(d["number"] or ""),
+                    },
                 )
             except MailTooLarge:
                 # No SMTP operation has occurred. Preserve the update and every
@@ -557,6 +546,11 @@ class Worker:
                     + unsubscribe,
                     identity=did,
                     unsubscribe=unsubscribe,
+                    headers={
+                        "X-Quant-Event-ID": d["event_id"],
+                        "X-Quant-Content-ID": d["content_id"] or "",
+                        "X-Quant-Version": str(d["number"] or ""),
+                    },
                 )
         self.db.execute(
             "UPDATE deliveries SET state='accepted',provider_id=?,error=NULL,updated_at=? WHERE id=?",

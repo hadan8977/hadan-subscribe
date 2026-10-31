@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import smtplib
 import socket
 import ssl
@@ -58,6 +59,7 @@ class Transport:
         html=None,
         attachments=(),
         unsubscribe=None,
+        headers=None,
     ):
         cfg = self.settings
         message = EmailMessage()
@@ -75,6 +77,15 @@ class Transport:
         if unsubscribe:
             message["List-Unsubscribe"] = f"<{unsubscribe}>"
             message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        for name, value in (headers or {}).items():
+            if not isinstance(name, str) or not re.fullmatch(r"X-Quant-[A-Za-z0-9-]+", name):
+                raise ValueError("Invalid extra mail header")
+            value = str(value)
+            if not value:
+                continue
+            if "\r" in value or "\n" in value:
+                raise ValueError("Invalid extra mail header value")
+            message[name] = value
         message.set_content(body)
         if html:
             message.add_alternative(html, subtype="html")

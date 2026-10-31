@@ -37,6 +37,17 @@ def ready_retries(journey):
     journey.service.db.execute("UPDATE jobs SET available_at=0 WHERE state='queued'")
 
 
+def test_content_email_carries_stable_event_and_content_ids(journey):
+    reader = journey.login()
+    journey.subscribe(reader)
+    item = journey.service.publish("quantgt", "email-ids", "Report", "Body")
+    journey.drain()
+    message = journey.messages(login=False)[-1]
+    assert message["X-Quant-Event-ID"] == item["event_id"]
+    assert message["X-Quant-Content-ID"] == item["id"]
+    assert message["X-Quant-Version"] == str(item["version"])
+
+
 def test_identical_publication_replay_and_worker_restart_do_not_duplicate_mail(journey):
     _, _, item = make_delivery(journey)
     same = journey.service.publish(

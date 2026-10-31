@@ -18,9 +18,11 @@ Public URLs below contain no credential. JSON POST requests use Content-Type: ap
 CONNECTION CHOICE
 1. MCP Events: preferred automatic transport when the platform supports MCP Events. The server receives a callback URL and signing secret and pushes report events. If events/subscribe succeeds, use webhook delivery and do not also poll the same event.
 2. MCP Tools / HTTPS polling: fallback only when webhook delivery is unavailable or permanently failed. Acknowledge each event once.
-3. Email: fallback channel. Do not repeat content already delivered by webhook or processed by polling; the server suppresses or delays fallback email when an agent has it.
+3. Email: an independent delivery channel; its timing is not changed by agent status. If you can read the owner's mailbox, use the email's X-Quant-Event-ID / X-Quant-Content-ID headers (or the /read/<content_id> link) as idempotency keys and do not report content already received via webhook or polling.
 
 MCP Tools alone does not provide a timer or background wakeup. MCP Events availability depends on the client and platform; do not claim it without a successful `events/subscribe`.
+CHANNEL DEDUPLICATION
+Webhook is preferred. While a webhook delivery for an event is queued, retrying or accepted, the server hides that event from MCP polling for the same binding. Treat eventId/event_id and content_id as idempotency keys across webhook, polling and email: report each piece of content at most once, and acknowledge the event once. Email delivery timing is independent and must not be changed by the agent.
 
 OAUTH FOR REMOTE MCP CLIENTS
 Discovery:

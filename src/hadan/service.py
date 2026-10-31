@@ -270,13 +270,13 @@ class Service:
                 "INSERT INTO subscriptions(id,user_id,product_id,created_at) VALUES(?,?,?,?)",
                 (sid, user_id, product_id, now),
             )
-            db.execute("INSERT INTO delivery_preferences VALUES(?,'fallback')", (sid,))
+            db.execute("INSERT INTO delivery_preferences VALUES(?,'always')", (sid,))
             audit(db, user_id, "subscribe", sid)
         return self.db.one("SELECT * FROM subscriptions WHERE id=?", (sid,))
 
     def subscriptions(self, user_id):
         return self.db.all(
-            "SELECT s.*,p.name,p.paid,COALESCE(d.email_policy,'fallback') email_policy FROM subscriptions s JOIN products p ON p.id=s.product_id LEFT JOIN delivery_preferences d ON d.subscription_id=s.id WHERE s.user_id=? ORDER BY s.created_at",
+            "SELECT s.*,p.name,p.paid,COALESCE(d.email_policy,'always') email_policy FROM subscriptions s JOIN products p ON p.id=s.product_id LEFT JOIN delivery_preferences d ON d.subscription_id=s.id WHERE s.user_id=? ORDER BY s.created_at",
             (user_id,),
         )
 
@@ -566,7 +566,7 @@ class Service:
     def _fanout(self, db, event_id, product_id, only_user=None):
         now = time.time()
         rows = db.execute(
-            "SELECT s.*,COALESCE(p.email_policy,'fallback') email_policy FROM subscriptions s LEFT JOIN delivery_preferences p ON p.subscription_id=s.id WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
+            "SELECT s.*,COALESCE(p.email_policy,'always') email_policy FROM subscriptions s LEFT JOIN delivery_preferences p ON p.subscription_id=s.id WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
             (product_id, now),
         ).fetchall()
         for s in rows:

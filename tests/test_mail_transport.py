@@ -163,3 +163,27 @@ def test_full_email_over_limit_uses_private_link_and_keeps_all_files(tmp_path):
     content = s.content(sub["user_id"], publication["id"])
     assert len(content["attachments"]) == 2
     assert s.db.one("SELECT email_format FROM subscriptions")["email_format"] == "full"
+
+
+def test_content_mail_carries_stable_quant_event_headers(tmp_path):
+    cfg = Settings(
+        data_dir=tmp_path,
+        mail_backend="file",
+        mail_from="Quant <notify@example.test>",
+    )
+    (tmp_path / "mail").mkdir()
+    Transport(cfg).mail(
+        "reader@example.test",
+        "Report",
+        "Body",
+        identity="event-123",
+        headers={
+            "X-Quant-Event-ID": "event-123",
+            "X-Quant-Content-ID": "content-456",
+            "X-Quant-Version": "2",
+        },
+    )
+    message = email.message_from_bytes((tmp_path / "mail" / "event-123.eml").read_bytes())
+    assert message["X-Quant-Event-ID"] == "event-123"
+    assert message["X-Quant-Content-ID"] == "content-456"
+    assert message["X-Quant-Version"] == "2"
