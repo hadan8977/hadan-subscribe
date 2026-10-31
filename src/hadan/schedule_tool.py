@@ -62,7 +62,7 @@ def upcoming_scans(limit: int = 12) -> dict:
             "mode": "scan_windows_only",
             "checks_per_scan": CHECKS_PER_SCAN,
             "first_check_delay_seconds": CHECK_DELAY_SECONDS,
-            "repeat_interval_seconds": CHECK_INTERVAL_SECONDS,
+            "check_interval_within_window_seconds": CHECK_INTERVAL_SECONDS,
             "max_checks_per_scan": CHECKS_PER_SCAN,
             "do_not_poll_between_scans": True,
         },

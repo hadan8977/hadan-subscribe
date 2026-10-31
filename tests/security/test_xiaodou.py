@@ -364,6 +364,11 @@ def test_mcp_agent_can_start_checkout_after_chat_confirmation(xd):
         assert value['amount_minor']==1000 and value['payment_by']=='owner'
         assert result['content'][1]['type']=='image' and result['content'][1]['mimeType']=='image/png'
         assert base64.b64decode(result['content'][1]['data']).startswith(b'\x89PNG')
+        again=agent.post('/mcp',json={"jsonrpc":"2.0","id":2,"method":"tools/call",
+            "params":{"name":"prepare_checkout","arguments":{
+                "plan_id":PLAN['id'],"method":"wechat","accept_terms":True,"terms_version":TERMS_VERSION}}}).json()['result']
+        again_value=json.loads(again['content'][0]['text'])
+        assert again_value['id']==value['id'] and again_value['qr_available'] is True
         assert s.db.one("SELECT COUNT(*) count FROM checkout_permissions")['count']==1
     assert len(calls)==1 and not s.entitled(user['id'],'quantgt')
 

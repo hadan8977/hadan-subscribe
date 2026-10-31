@@ -62,6 +62,17 @@ class AgentCheckout:
         allowed = {"plan_id", "method", "accept_terms", "terms_version"}
         if not isinstance(payload, dict) or not payload or set(payload) - allowed:
             raise Problem("付款参数无效", 400)
+        existing = self.s.db.one(
+            "SELECT p.plan_id,p.method,o.id order_id,o.status order_status "
+            "FROM checkout_permissions p JOIN purchase_orders o ON o.id=p.id "
+            "WHERE p.binding_id=? AND p.user_id=? "
+            "AND o.status IN ('creating','pending','verifying','review') AND o.expires_at>? "
+            "ORDER BY p.created_at DESC LIMIT 1",
+            (binding["id"], binding["user_id"], time.time()),
+        )
+        if existing and existing["plan_id"] == payload.get("plan_id") and existing["method"] == payload.get("method"):
+            order = Commerce(self.s).order(binding["user_id"], existing["order_id"])
+            return self._public(order, binding["user_id"], include_qr=True)
         with self.s.db.transaction() as db:
             self.s._limit(db, "agent-checkout:" + binding["id"], 6, 3600)
         result = self.authorize(binding["user_id"], binding["id"], payload, payer_ip)
