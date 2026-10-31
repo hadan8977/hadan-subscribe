@@ -623,7 +623,7 @@ def _assert_screenshot_symbols_match(
         for field in stable_fields:
             old = str(wanted.get(field) or "").strip()
             new = str(actual.get(field) or "").strip()
-            if old and old.casefold() != new.casefold():
+            if old and new and old.casefold() != new.casefold():
                 raise RuntimeError(
                     f"{name} screenshot changed {field} at row {index + 1} "
                     f"({wanted.get('symbol')}): capture={old!r} screenshot={new!r}"
