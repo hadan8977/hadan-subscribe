@@ -408,6 +408,19 @@ def test_mcp_events_subscribe_and_deliver(journey, monkeypatch):
     assert headers["X-MCP-Subscription-Id"] == subscribed["result"]["id"]
     row = journey.service.db.one("SELECT state FROM mcp_event_deliveries")
     assert row["state"] == "accepted"
+    listed = mcp(
+        owner,
+        access,
+        "tools/call",
+        {"name": "list_events", "arguments": {}},
+    )
+    listed_value = json.loads(listed["result"]["content"][0]["text"])
+    assert published["event_id"] not in {item["id"] for item in listed_value["events"]}
+    # The webhook is the preferred channel: do not send the same event by email fallback.
+    journey.service.db.execute("UPDATE jobs SET available_at=0 WHERE state='queued'")
+    journey.drain()
+    assert journey.messages(login=False) == []
+    assert journey.service.db.one("SELECT state FROM deliveries")["state"] == "skipped"
     read = mcp(
         owner,
         access,

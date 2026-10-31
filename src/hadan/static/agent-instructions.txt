@@ -16,10 +16,9 @@ PUBLIC URLS AND CREDENTIALS
 Public URLs below contain no credential. JSON POST requests use Content-Type: application/json unless a form encoding is specified. Agent content requests use Authorization: Bearer <private credential>. Store a device credential only in the client's secure secret facility; never put it in a URL, public prompt, transcript or ordinary log.
 
 CONNECTION CHOICE
-1. MCP Events: preferred automatic transport when the platform supports MCP Events. The server receives a callback URL and signing secret and pushes report events.
-2. MCP Tools: authenticated on-demand tools over MCP.
-3. HTTPS API: pairing plus a device credential for clients that can store it securely and schedule work.
-4. Email: an independent delivery channel controlled by the owner.
+1. MCP Events: preferred automatic transport when the platform supports MCP Events. The server receives a callback URL and signing secret and pushes report events. If events/subscribe succeeds, use webhook delivery and do not also poll the same event.
+2. MCP Tools / HTTPS polling: fallback only when webhook delivery is unavailable or permanently failed. Acknowledge each event once.
+3. Email: fallback channel. Do not repeat content already delivered by webhook or processed by polling; the server suppresses or delays fallback email when an agent has it.
 
 MCP Tools alone does not provide a timer or background wakeup. MCP Events availability depends on the client and platform; do not claim it without a successful `events/subscribe`.
 

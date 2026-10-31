@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -620,8 +621,16 @@ def create_app(settings=None):
         before: int | None = None,
     ):
         user_id, is_agent = principal(request)
+        binding_id = agent(request)["id"] if request.headers.get("authorization") else None
         rows = s.events(
-            user_id, after, limit, pending, agent=is_agent, newest=newest, before=before
+            user_id,
+            after,
+            limit,
+            pending,
+            agent=is_agent,
+            newest=newest,
+            before=before,
+            binding_id=binding_id,
         )
         return {
             "events": rows,
@@ -646,7 +655,7 @@ def create_app(settings=None):
             params.append(before if before is not None else time.time() + 1)
         params.append(min(max(limit, 1), 100))
         rows = s.db.all(
-            "SELECT c.id,c.product_id,v.title,v.number version,v.created_at FROM contents c JOIN versions v ON v.content_id=c.id AND v.number=c.current_version JOIN subscriptions sub ON sub.product_id=c.product_id WHERE sub.user_id=? AND sub.status='active' AND (sub.expires_at IS NULL OR sub.expires_at>?) AND c.withdrawn=0"
+            "SELECT c.id,c.product_id,v.title,v.number version,v.created_at FROM contents c JOIN versions v ON v.content_id=c.id AND v.number=c.current_version JOIN subscriptions sub ON sub.product_id=c.product_id WHERE sub.user_id=? AND sub.status='active' AND (sub.expires_at IS NULL OR sub.expires_at>?) AND c.withdrawn=0 AND c.source_key NOT LIKE 'test:%'"
             + cursor
             + (" AND sub.agent_enabled=1" if is_agent else "")
             + " ORDER BY v.created_at DESC,c.id DESC LIMIT ?",
@@ -977,6 +986,14 @@ def create_app(settings=None):
         # 405 here makes connector validation fail before the consent page.
         # This is a closed, empty SSE probe and exposes no data.
         authorization = request.headers.get("authorization", "")
+        if diagnostic_logger is not None and method == "events/subscribe":
+            diagnostic_logger.info(json.dumps({
+                "mcp_event_subscribe_received": {
+                    "id_present": identifier is not None,
+                    "params_type": type(params_obj).__name__,
+                    "auth_present": bool(authorization),
+                }
+            }, ensure_ascii=False))
         if authorization:
             if not authorization.startswith("Bearer "):
                 return mcp_unauthorized()
@@ -1017,6 +1034,14 @@ def create_app(settings=None):
                 status_code=400,
             )
         request.state.mcp_method = method
+        if diagnostic_logger is not None and isinstance(method, str) and "event" in method.lower():
+            diagnostic_logger.info(json.dumps({
+                "mcp_event_method_received": {
+                    "method": method,
+                    "id_present": p.get("id") is not None,
+                    "params_type": type(p.get("params")).__name__,
+                }
+            }, ensure_ascii=False))
         identifier = p.get("id")
         if identifier is None:
             return Response(status_code=202)
@@ -1044,6 +1069,8 @@ def create_app(settings=None):
                     pending=checkout_tool,
                 )
             except Problem as exc:
+                if diagnostic_logger is not None and method == "events/subscribe":
+                    diagnostic_logger.info(json.dumps({"mcp_event_subscribe_auth_error": {"status": exc.status, "message": exc.message}}, ensure_ascii=False))
                 if exc.status == 401:
                     return mcp_unauthorized()
                 if method == "tools/call":
@@ -1067,6 +1094,8 @@ def create_app(settings=None):
                 if required not in scopes:
                     return mcp_tool_challenge(identifier)
             elif method in ("events/subscribe", "events/unsubscribe") and "quant.read" not in scopes:
+                if diagnostic_logger is not None and method == "events/subscribe":
+                    diagnostic_logger.info(json.dumps({"mcp_event_subscribe_scope_error": {"scope": b.get("oauth_scope")}}, ensure_ascii=False))
                 return mcp_tool_challenge(identifier)
         tools = [
             {
@@ -1299,11 +1328,42 @@ def create_app(settings=None):
             elif method == "events/list":
                 result = mcp_events.list(b)
             elif method == "events/subscribe":
+                if diagnostic_logger is not None:
+                    diagnostic_logger.info(json.dumps({"mcp_event_subscribe_branch": {"has_b": b is not None}}, ensure_ascii=False))
+                sub_params = p.get("params") if isinstance(p.get("params"), dict) else {}
+                delivery = sub_params.get("delivery") if isinstance(sub_params.get("delivery"), dict) else {}
+                callback = delivery.get("url")
+                secret = delivery.get("secret")
+                callback_host = ""
+                callback_digest = ""
+                if isinstance(callback, str):
+                    try:
+                        callback_host = urlsplit(callback).hostname or ""
+                    except ValueError:
+                        callback_host = ""
+                    callback_digest = hashlib.sha256(callback.encode()).hexdigest()[:12]
+                attempt = {
+                    "user_id": b["user_id"],
+                    "binding_id": b["id"],
+                    "callback_host": callback_host,
+                    "callback_digest": callback_digest,
+                    "delivery_keys": sorted(delivery),
+                    "secret_prefix": secret[:6] if isinstance(secret, str) else None,
+                    "secret_length": len(secret) if isinstance(secret, str) else None,
+                    "ttl_ms": sub_params.get("ttlMs"),
+                    "arguments": sub_params.get("arguments"),
+                }
+                if diagnostic_logger is not None:
+                    diagnostic_logger.info(json.dumps({"mcp_event_subscribe_attempt": attempt}, ensure_ascii=False))
                 try:
                     result = await run_in_threadpool(
                         mcp_events.subscribe, b, p.get("params") or {}
                     )
+                    if diagnostic_logger is not None:
+                        diagnostic_logger.info(json.dumps({"mcp_event_subscribe_ok": {"id": result.get("id")}}, ensure_ascii=False))
                 except CallbackError as exc:
+                    if diagnostic_logger is not None:
+                        diagnostic_logger.info(json.dumps({"mcp_event_subscribe_error": {"kind": "callback", "reason": exc.reason, "message": str(exc)}}, ensure_ascii=False))
                     return {
                         "jsonrpc": "2.0",
                         "id": identifier,
@@ -1314,6 +1374,8 @@ def create_app(settings=None):
                         },
                     }
                 except Problem as exc:
+                    if diagnostic_logger is not None:
+                        diagnostic_logger.info(json.dumps({"mcp_event_subscribe_error": {"kind": "problem", "status": exc.status, "message": exc.message}}, ensure_ascii=False))
                     return {
                         "jsonrpc": "2.0",
                         "id": identifier,
@@ -1443,6 +1505,7 @@ def create_app(settings=None):
                             int(a.get("after", 0)),
                             pending=True,
                             agent=True,
+                            binding_id=b["id"],
                         )
                     }
                 elif name == "read_content":

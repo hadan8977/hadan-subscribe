@@ -23,10 +23,9 @@ Protocol reference: {{BASE_URL}}/agent/instructions
 
 Use the best transport the runtime actually supports, in this order:
 
-1. **MCP Events** — subscribe to `quant.report.published` through server-side webhook delivery. This is the preferred automatic path when the platform supports MCP Events.
-2. **MCP Tools** — read and acknowledge reports when the agent invokes the MCP server.
-3. **HTTPS API** — use a persistent credential only when the runtime provides secure secret storage and, for automatic delivery, persistent scheduling.
-4. **Email** — preserve or enable owner-authorized email delivery as an independent fallback.
+1. **MCP Events** — subscribe to `quant.report.published` through server-side webhook delivery. This is the preferred automatic path when the platform supports MCP Events. Once `events/subscribe` succeeds, use webhook delivery; do not also poll for the same event.
+2. **MCP Tools / HTTPS polling** — use polling only when webhook delivery is unavailable or a webhook delivery has permanently failed. Read and acknowledge each event once.
+3. **Email** — fallback channel. Do not repeat content already delivered by webhook or processed by polling; the server suppresses or delays fallback email when an agent has it.
 
 MCP Tools alone is on-demand access; it does not schedule work. Use polling only when the runtime can securely store a credential and run a persistent schedule. If no supported persistent connection exists, offer on-demand access and email; do not start pairing merely to appear connected.
 

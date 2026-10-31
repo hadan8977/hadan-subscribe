@@ -154,3 +154,23 @@ def test_safe_error_fallback_and_bidirectional_language_switch():
     assert translate_error("付款订单不存在", "en") == "This payment order is unavailable."
     assert translate_error("This payment order is unavailable.", "zh-CN") == "付款订单不存在"
     assert translate_error("未登记的新错误", "en") == template_context(request(query="lang=en"))["t"]("generic_error")
+
+def test_delivery_test_content_is_hidden_from_human_history(journey):
+    owner = journey.login("test-delivery-filter@example.test")
+    journey.subscribe(owner)
+    me = owner.get("/api/me").json()["user"]
+    result = journey.service.publish(
+        "quantgt", "test:delivery-filter", "Delivery test", "One-time delivery test.", baseline=True
+    )
+    cid, eid = result["id"], result["event_id"]
+    with journey.service.db.transaction() as db:
+        journey.service._fanout(db, eid, "quantgt", only_user=me["id"])
+    human_events = owner.get("/api/events", params={"limit": 100, "newest": "true"}).json()["events"]
+    human_library = owner.get("/api/library").json()["contents"]
+    assert cid not in {item["content_id"] for item in human_events}
+    assert cid not in {item["id"] for item in human_library}
+    _, agent = journey.connect(owner)
+    agent_events = agent.get("/api/events", params={"pending": "true", "limit": 100}).json()["events"]
+    assert cid in {item["content_id"] for item in agent_events}
+
+

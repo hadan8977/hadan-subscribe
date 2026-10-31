@@ -270,13 +270,13 @@ class Service:
                 "INSERT INTO subscriptions(id,user_id,product_id,created_at) VALUES(?,?,?,?)",
                 (sid, user_id, product_id, now),
             )
-            db.execute("INSERT INTO delivery_preferences VALUES(?,'always')", (sid,))
+            db.execute("INSERT INTO delivery_preferences VALUES(?,'fallback')", (sid,))
             audit(db, user_id, "subscribe", sid)
         return self.db.one("SELECT * FROM subscriptions WHERE id=?", (sid,))
 
     def subscriptions(self, user_id):
         return self.db.all(
-            "SELECT s.*,p.name,p.paid,COALESCE(d.email_policy,'always') email_policy FROM subscriptions s JOIN products p ON p.id=s.product_id LEFT JOIN delivery_preferences d ON d.subscription_id=s.id WHERE s.user_id=? ORDER BY s.created_at",
+            "SELECT s.*,p.name,p.paid,COALESCE(d.email_policy,'fallback') email_policy FROM subscriptions s JOIN products p ON p.id=s.product_id LEFT JOIN delivery_preferences d ON d.subscription_id=s.id WHERE s.user_id=? ORDER BY s.created_at",
             (user_id,),
         )
 
@@ -566,7 +566,7 @@ class Service:
     def _fanout(self, db, event_id, product_id, only_user=None):
         now = time.time()
         rows = db.execute(
-            "SELECT s.*,COALESCE(p.email_policy,'always') email_policy FROM subscriptions s LEFT JOIN delivery_preferences p ON p.subscription_id=s.id WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
+            "SELECT s.*,COALESCE(p.email_policy,'fallback') email_policy FROM subscriptions s LEFT JOIN delivery_preferences p ON p.subscription_id=s.id WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
             (product_id, now),
         ).fetchall()
         for s in rows:
@@ -814,11 +814,27 @@ class Service:
         *,
         newest=False,
         before=None,
+        binding_id=None,
     ):
         condition = " AND r.state='pending'" if pending else ""
         params = [user_id, max(0, after), time.time()]
         if agent:
             condition += " AND s.agent_enabled=1"
+            if binding_id:
+                # A webhook delivery is the preferred channel. Do not hand the
+                # same event to polling while its webhook is queued or accepted;
+                # polling remains the fallback after a permanent failure.
+                condition += (
+                    " AND NOT EXISTS (SELECT 1 FROM mcp_event_deliveries med "
+                    "JOIN mcp_event_subscriptions mes ON mes.id=med.subscription_id "
+                    "WHERE mes.binding_id=? AND med.event_id=e.id "
+                    "AND med.state IN ('queued','sending','accepted','retrying'))"
+                )
+                params.append(binding_id)
+        else:
+            # Delivery-test reports are visible to agents and direct links,
+            # but never appear in the human update history.
+            condition += " AND (c.id IS NULL OR c.source_key NOT LIKE 'test:%')"
         if before is not None:
             condition += " AND e.seq<?"
             params.append(max(0, before))

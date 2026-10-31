@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ses_feedback(id TEXT PRIMARY KEY,event_type TEXT NOT 
 CREATE TABLE IF NOT EXISTS directmail_feedback(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,message_id TEXT NOT NULL DEFAULT '',recipient TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT '',detail TEXT NOT NULL DEFAULT '',created_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS directmail_feedback_message ON directmail_feedback(message_id,event_type);
 CREATE INDEX IF NOT EXISTS ses_feedback_message ON ses_feedback(message_id,event_type);
-CREATE TABLE IF NOT EXISTS delivery_preferences(subscription_id TEXT PRIMARY KEY REFERENCES subscriptions(id),email_policy TEXT NOT NULL DEFAULT 'always');
+CREATE TABLE IF NOT EXISTS delivery_preferences(subscription_id TEXT PRIMARY KEY REFERENCES subscriptions(id),email_policy TEXT NOT NULL DEFAULT 'fallback');
 
 CREATE INDEX IF NOT EXISTS jobs_delivery ON jobs(json_extract(payload,'$.delivery_id'));
 
