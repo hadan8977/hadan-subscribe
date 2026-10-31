@@ -242,7 +242,8 @@ def _write_picks_sheet(
         ws.column_dimensions[get_column_letter(idx)].width = column[4]
     ws.column_dimensions[get_column_letter(last_col)].width = 12
 
-    soon = _report_date(data) + timedelta(days=EARNINGS_SOON_DAYS)
+    report_day = _report_date(data)
+    soon = report_day + timedelta(days=EARNINGS_SOON_DAYS)
     for offset, row in enumerate(rows):
         r = FIRST_DATA_ROW + offset
         _body_cell(ws.cell(r, 1, offset + 1), "center", color=MUTED)
@@ -253,7 +254,7 @@ def _write_picks_sheet(
             _body_cell(cell, align, fmt if numeric else None)
             if field == "symbol":
                 cell.font = _font(bold=True, color=GREEN_DARK)
-            elif field == "next_earnings" and isinstance(value, date) and value <= soon:
+            elif field == "next_earnings" and isinstance(value, date) and report_day <= value <= soon:
                 cell.font = _font(bold=True, color=AMBER)
             elif field in changed_fields.get(row.get("symbol"), set()):
                 keep = (

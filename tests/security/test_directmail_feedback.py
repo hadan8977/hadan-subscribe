@@ -188,6 +188,7 @@ def test_production_preflight_accepts_directmail_feedback_without_ses():
         smtp_password="not-a-real-password",
         smtp_tls="implicit",
         mail_from="Quant <notify@example.test>",
+        support_contact="support@quant.example",
         directmail_feedback_enabled=True,
         directmail_webhook_token=TOKEN,
     )

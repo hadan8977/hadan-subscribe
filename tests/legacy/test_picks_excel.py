@@ -259,3 +259,36 @@ class PicksExcelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EarningsHighlightTests(unittest.TestCase):
+    def test_past_earnings_are_displayed_but_not_highlighted(self):
+        from datetime import date, timedelta
+
+        base = copy.deepcopy(NEW)
+        report_day = picks_excel._report_date(base)
+        rows = [
+            {"symbol": "PAST", "next_earnings": (report_day - timedelta(days=1)).isoformat()},
+            {"symbol": "TODAY", "next_earnings": report_day.isoformat()},
+            {"symbol": "DAY14", "next_earnings": (report_day + timedelta(days=14)).isoformat()},
+            {"symbol": "DAY15", "next_earnings": (report_day + timedelta(days=15)).isoformat()},
+        ]
+        base["monthly"]["rows"] = rows
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "earnings.xlsx"
+            picks_excel.write_report(path, base)
+            ws = load_workbook(path)["Portfolio"]
+            columns = header_index(ws)
+            colors = {}
+            for row_index in range(
+                picks_excel.FIRST_DATA_ROW,
+                picks_excel.FIRST_DATA_ROW + len(rows),
+            ):
+                symbol = ws.cell(row_index, columns["Symbol"]).value
+                cell = ws.cell(row_index, columns["Next Earnings"])
+                colors[symbol] = cell.font.color.rgb if cell.font.color else None
+        amber = picks_excel.AMBER
+        self.assertNotEqual((colors["PAST"] or "")[-6:], amber)
+        self.assertEqual((colors["TODAY"] or "")[-6:], amber)
+        self.assertEqual((colors["DAY14"] or "")[-6:], amber)
+        self.assertNotEqual((colors["DAY15"] or "")[-6:], amber)

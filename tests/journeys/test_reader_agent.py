@@ -170,7 +170,7 @@ def test_email_and_agent_channels_are_independent_and_provider_acceptance_is_not
             reader,
             "PATCH",
             f"/api/subscriptions/{sub['id']}",
-            json={"email_policy": "always", "email_format": "full"},
+            json={"email_format": "full"},
         ).status_code
         == 200
     )
@@ -214,12 +214,6 @@ def test_unsubscribe_link_get_is_safe_and_post_stops_already_queued_email(journe
     reader = journey.login()
     sub = journey.subscribe(reader)
     _, agent = journey.connect(reader)
-    journey.write(
-        reader,
-        "PATCH",
-        f"/api/subscriptions/{sub['id']}",
-        json={"email_policy": "always"},
-    )
     item = journey.service.publish(
         "quantgt", "unsubscribe", "Queued report", "Still readable by agent"
     )

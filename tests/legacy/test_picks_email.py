@@ -284,3 +284,35 @@ class WatchlistContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignalTimestampSafetyTests(unittest.TestCase):
+    def _row(self, signal_at):
+        return {
+            "signal_at": signal_at,
+            "signal_price": "$100.00",
+            "current_price": "$110.00",
+        }
+
+    def test_ambiguous_or_invalid_signal_times_do_not_render_a_move(self):
+        from datetime import datetime, timezone
+
+        as_of = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
+        for value in (None, "", "2026-10-06", "2026-10-06T13:00:00", "not-a-time"):
+            with self.subTest(value=value):
+                row = self._row(value)
+                if value in (None, ""):
+                    self.assertAlmostEqual(since_signal(row, as_of), 0.1)
+                else:
+                    self.assertIsNone(since_signal(row, as_of))
+
+    def test_zoned_signal_times_compare_without_type_errors(self):
+        from datetime import datetime, timezone
+
+        as_of = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
+        self.assertAlmostEqual(
+            since_signal(self._row("2026-10-01T09:00:00Z"), as_of), 0.1
+        )
+        self.assertIsNone(
+            since_signal(self._row("2026-10-08T09:00:00+08:00"), as_of)
+        )

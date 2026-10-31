@@ -369,3 +369,20 @@ def test_replay_does_not_requeue_accepted_or_uncertain_delivery(source_service):
         row["state"]
         for row in s.db.all("SELECT state FROM deliveries ORDER BY user_id")
     ] == ["accepted", "uncertain", "queued"]
+
+
+def test_duplicate_daily_tickers_do_not_publish_or_replace_the_baseline(source_service):
+    s = source_service
+    data = picks_data()
+    jobs.accept_picks(s, data)
+    accepted = jobs.state(s, "picks:accepted")
+    events = row_count(s, "events")
+    deliveries = row_count(s, "deliveries")
+    duplicate = copy.deepcopy(data)
+    duplicate["weekly"]["rows"][1] = copy.deepcopy(duplicate["weekly"]["rows"][0])
+    duplicate["fetched_at"] = "2026-10-26T13:00:00+00:00"
+    with pytest.raises(RuntimeError, match="duplicate symbols"):
+        jobs.accept_picks(s, duplicate)
+    assert jobs.state(s, "picks:accepted") == accepted
+    assert row_count(s, "events") == events
+    assert row_count(s, "deliveries") == deliveries

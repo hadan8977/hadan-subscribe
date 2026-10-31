@@ -47,10 +47,16 @@ def guard_artifacts(function):
     return wrapped
 
 
+# Automatic polling suppresses an event while a recent webhook attempt is in
+# flight. The bound ensures an accepted callback that the client never
+# processed cannot make the event permanently invisible.
+WEBHOOK_POLL_SUPPRESSION_SECONDS = 30 * 60
+
+
 class Problem(Exception):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, code=None, data=None):
         super().__init__(message)
-        self.message, self.status = message, status
+        self.message, self.status, self.code, self.data = message, status, code, data
 
 
 class Service:
@@ -176,10 +182,10 @@ class Service:
         if not b or b["state"] not in (
             ("pending", "active") if pending else ("active",)
         ):
-            raise Problem("Agent 授权无效或已撤销", 401)
+            raise Problem("Agent 授权无效或已撤销", 401, code="authentication_required")
         owner = self.db.one("SELECT email FROM users WHERE id=?", (b["user_id"],))
         if not owner or not self._email_allowed(owner["email"]):
-            raise Problem("当前仅向受邀账号开放", 403)
+            raise Problem("当前仅向受邀账号开放", 403, code="access_denied")
         self.db.execute(
             "UPDATE bindings SET last_seen=? WHERE id=?", (time.time(), b["id"])
         )
@@ -223,18 +229,20 @@ class Service:
             (digest(raw), time.time()),
         )
         if not b or b["state"] != "active":
-            raise Problem("Agent 授权无效或已撤销", 401)
+            raise Problem("Agent 授权无效或已撤销", 401, code="authentication_required")
         owner = self.db.one("SELECT email FROM users WHERE id=?", (b["user_id"],))
         if not owner or not self._email_allowed(owner["email"]):
-            raise Problem("当前仅向受邀账号开放", 403)
+            raise Problem("当前仅向受邀账号开放", 403, code="access_denied")
         if require_subscription:
             sub = self.db.one(
                 "SELECT * FROM subscriptions WHERE user_id=? AND product_id='quantgt' "
                 "AND status='active' AND (expires_at IS NULL OR expires_at>?)",
                 (b["user_id"], time.time()),
             )
-            if not sub or not sub["agent_enabled"]:
-                raise Problem("该账号的 Agent 交付已关闭", 403)
+            if not sub:
+                raise Problem("需要有效订阅", 403, code="subscription_required")
+            if not sub["agent_enabled"]:
+                raise Problem("该账号的 Agent 交付已关闭", 403, code="agent_delivery_disabled")
         self.db.execute(
             "UPDATE bindings SET last_seen=? WHERE id=?", (time.time(), b["id"])
         )
@@ -276,21 +284,18 @@ class Service:
 
     def subscriptions(self, user_id):
         return self.db.all(
-            "SELECT s.*,p.name,p.paid,COALESCE(d.email_policy,'always') email_policy FROM subscriptions s JOIN products p ON p.id=s.product_id LEFT JOIN delivery_preferences d ON d.subscription_id=s.id WHERE s.user_id=? ORDER BY s.created_at",
+            "SELECT s.*,p.name,p.paid FROM subscriptions s JOIN products p ON p.id=s.product_id WHERE s.user_id=? ORDER BY s.created_at",
             (user_id,),
         )
 
     def preferences(self, user_id, sid, values):
-        allowed = {"email_enabled", "agent_enabled", "email_format", "email_policy"}
+        allowed = {"email_enabled", "agent_enabled", "email_format"}
         if not values or set(values) - allowed:
             raise Problem("不支持的交付设置")
         for key in ("email_enabled", "agent_enabled"):
             if key in values and type(values[key]) is not bool:
                 raise Problem("交付开关必须是布尔值")
-        if values.get("email_format", "summary") not in (
-            "summary",
-            "full",
-        ) or values.get("email_policy", "always") not in ("fallback", "always"):
+        if values.get("email_format", "summary") not in ("summary", "full"):
             raise Problem("无效的邮件交付方式")
         with self.db.transaction() as db:
             row = db.execute(
@@ -298,18 +303,12 @@ class Service:
             ).fetchone()
             if not row:
                 raise Problem("订阅不存在", 404)
-            fields = {k: v for k, v in values.items() if k != "email_policy"}
-            if fields:
+            if values:
                 db.execute(
                     "UPDATE subscriptions SET "
-                    + ",".join(k + "=?" for k in fields)
+                    + ",".join(k + "=?" for k in values)
                     + " WHERE id=?",
-                    (*fields.values(), sid),
-                )
-            if "email_policy" in values:
-                db.execute(
-                    "INSERT INTO delivery_preferences VALUES(?,?) ON CONFLICT(subscription_id) DO UPDATE SET email_policy=excluded.email_policy",
-                    (sid, values["email_policy"]),
+                    (*values.values(), sid),
                 )
             audit(db, user_id, "preferences", sid, values)
 
@@ -426,7 +425,10 @@ class Service:
 
     def pair(self, name, mode, endpoint, ip):
         if mode != "poll":
-            raise Problem("自动配对先使用定时读取；Webhook 请在网页中创建")
+            raise Problem(
+                "自动配对仅支持定时读取；MCP Events 需要客户端支持托管回调，"
+                "否则请使用轮询或邮箱"
+            )
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise Problem("Agent 名称无效")
         secret, pid = token(), uid()
@@ -488,7 +490,6 @@ class Service:
         user_id,
         channel,
         binding_id="",
-        delay=0,
         job_kind="deliver",
         job_dedupe=None,
     ):
@@ -503,7 +504,6 @@ class Service:
                 job_kind,
                 {"delivery_id": did},
                 job_dedupe or "delivery:" + did,
-                available_at=now + delay,
             )
 
     def account_notice(self, db, user_id, product_id, kind, title, body, identity):
@@ -533,29 +533,12 @@ class Service:
         binding = db.execute(
             "SELECT * FROM bindings WHERE user_id=? AND state='active'", (user_id,)
         ).fetchone()
-        pref = (
-            db.execute(
-                "SELECT email_policy FROM delivery_preferences WHERE subscription_id=?",
-                (sub["id"],),
-            ).fetchone()
-            if sub
-            else None
-        )
-        delay = (
-            1800
-            if sub
-            and sub["agent_enabled"]
-            and binding
-            and (not pref or pref[0] == "fallback")
-            else 0
-        )
         # Queue even opted-out email for an auditable skip; never revive consent at dispatch.
         self._delivery(
             db,
             eid,
             user_id,
             "email",
-            delay=delay,
             job_kind="account_mail",
             job_dedupe=identity,
         )
@@ -566,7 +549,7 @@ class Service:
     def _fanout(self, db, event_id, product_id, only_user=None):
         now = time.time()
         rows = db.execute(
-            "SELECT s.*,COALESCE(p.email_policy,'always') email_policy FROM subscriptions s LEFT JOIN delivery_preferences p ON p.subscription_id=s.id WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
+            "SELECT * FROM subscriptions WHERE product_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)",
             (product_id, now),
         ).fetchall()
         for s in rows:
@@ -583,12 +566,7 @@ class Service:
             if s["agent_enabled"] and b and b["mode"] == "webhook":
                 self._delivery(db, event_id, s["user_id"], "webhook", b["id"])
             if s["email_enabled"]:
-                delay = (
-                    1800
-                    if s["email_policy"] == "fallback" and s["agent_enabled"] and b
-                    else 0
-                )
-                self._delivery(db, event_id, s["user_id"], "email", delay=delay)
+                self._delivery(db, event_id, s["user_id"], "email")
 
     @guard_artifacts
     def publish(
@@ -815,22 +793,26 @@ class Service:
         newest=False,
         before=None,
         binding_id=None,
+        include_webhook=False,
     ):
         condition = " AND r.state='pending'" if pending else ""
-        params = [user_id, max(0, after), time.time()]
+        now = time.time()
+        params = [user_id, max(0, after), now]
         if agent:
             condition += " AND s.agent_enabled=1"
-            if binding_id:
-                # A webhook delivery is the preferred channel. Do not hand the
-                # same event to polling while its webhook is queued or accepted;
-                # polling remains the fallback after a permanent failure.
+            if binding_id and not include_webhook:
+                # A webhook delivery is the preferred channel. Hide it from
+                # automatic polling only while the subscription is active and
+                # the attempt is recent; an accepted-but-unprocessed event must
+                # be recoverable after timeout, unsubscribe or revocation.
+                cutoff = now - WEBHOOK_POLL_SUPPRESSION_SECONDS
                 condition += (
                     " AND NOT EXISTS (SELECT 1 FROM mcp_event_deliveries med "
                     "JOIN mcp_event_subscriptions mes ON mes.id=med.subscription_id "
-                    "WHERE mes.binding_id=? AND med.event_id=e.id "
-                    "AND med.state IN ('queued','sending','accepted','retrying'))"
+                    "WHERE mes.binding_id=? AND mes.active=1 AND mes.refresh_before>? "
+                    "AND med.event_id=e.id AND med.updated_at>?)"
                 )
-                params.append(binding_id)
+                params.extend([binding_id, now, cutoff])
         else:
             # Delivery-test reports are visible to agents and direct links,
             # but never appear in the human update history.

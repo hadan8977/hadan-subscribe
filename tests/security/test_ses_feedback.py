@@ -262,6 +262,7 @@ def test_per_process_smtp_preflight():
         mail_backend="smtp",
         ses_feedback_enabled=True,
         ses_sns_topic_arn=TOPIC,
+        support_contact="support@quant.example",
         production=True,
     )
     web = Settings(**base, smtp_required=False)
@@ -269,3 +270,20 @@ def test_per_process_smtp_preflight():
     assert any("SMTP" in error for error in web.preflight(require_smtp=True))
     worker = Settings(**base, smtp_required=True)
     assert any("SMTP" in error for error in worker.preflight(require_smtp=True))
+
+
+def test_production_requires_a_real_support_contact():
+    base = dict(
+        base_url="https://quant.example.com",
+        secret="x" * 64,
+        admin_emails=("owner@example.com",),
+        mail_backend="smtp",
+        ses_feedback_enabled=True,
+        ses_sns_topic_arn=TOPIC,
+        production=True,
+        smtp_required=False,
+    )
+    missing = Settings(**base, support_contact="")
+    assert any("SUPPORT_CONTACT" in error for error in missing.preflight(require_smtp=False))
+    placeholder = Settings(**base, support_contact="owner@example.test")
+    assert any("SUPPORT_CONTACT" in error for error in placeholder.preflight(require_smtp=False))

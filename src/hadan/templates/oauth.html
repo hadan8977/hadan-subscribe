@@ -1,59 +1,61 @@
 {% extends "base.html" %}
 {% block page %}oauth{% endblock %}
+{% block title_key %}oauth_title{% endblock %}
 {% block title %}{{t('oauth_title')}}{% endblock %}
-{% block extra_head %}<script src="/static/oauth.js?v=20261031-autoapprove" defer></script>{% endblock %}
+{% block extra_head %}<script src="/static/oauth.js?v=20261031-oauth-i18n" defer></script>{% endblock %}
 {% block body %}
 <section class="login-panel oauth-panel">
   <p class="eyebrow">QUANT · AUTHORIZATION</p>
   {% if oauth_error %}
-    <h1>{{t('oauth_title')}}</h1>
-    <p class="error">{{oauth_error}}</p>
-    <a class="button" href="/app">{{t('back_account')}}</a>
+    <h1 data-i18n="oauth_title">{{t('oauth_title')}}</h1>
+    <p class="error" data-message-original="{{oauth_error}}">{{oauth_error}}</p>
+    <a class="button" href="/app" data-i18n="back_account">{{t('back_account')}}</a>
   {% elif oauth_request %}
-    <h1>{{t('oauth_title')}}</h1>
-    <p>{{t('oauth_intro')}}</p>
+    <h1 data-i18n="oauth_title">{{t('oauth_title')}}</h1>
+    <p data-i18n="oauth_intro">{{t('oauth_intro')}}</p>
     <div class="panel oauth-summary">
-      <p><span class="muted">{{t('oauth_requesting')}}</span><br><strong>{{client_name}}</strong></p>
-      {% if signed_in %}<p><span class="muted">{{t('oauth_signed_in')}}</span><br><strong>{{signed_in.email}}</strong></p>{% endif %}
+      <p><span class="muted" data-i18n="oauth_requesting">{{t('oauth_requesting')}}</span><br><strong>{{client_name}}</strong></p>
+      {% if signed_in %}<p><span class="muted" data-i18n="oauth_signed_in">{{t('oauth_signed_in')}}</span><br><strong>{{signed_in.email}}</strong></p>{% endif %}
       <p class="muted">{{redirect_host}}</p>
     </div>
     <ul class="oauth-scopes">
       {% for scope in scopes %}
-        <li>{% if scope == 'quant.read' %}{{t('oauth_scope_read')}}{% elif scope == 'quant.ack' %}{{t('oauth_scope_ack')}}{% elif scope == 'offline_access' %}{{t('oauth_scope_offline')}}{% else %}{{scope}}{% endif %}</li>
+        <li>{% if scope == 'quant.read' %}<span data-i18n="oauth_scope_read">{{t('oauth_scope_read')}}</span>{% elif scope == 'quant.ack' %}<span data-i18n="oauth_scope_ack">{{t('oauth_scope_ack')}}</span>{% elif scope == 'offline_access' %}<span data-i18n="oauth_scope_offline">{{t('oauth_scope_offline')}}</span>{% else %}{{scope}}{% endif %}</li>
       {% endfor %}
     </ul>
-    {% if current_binding %}<p class="error">{{t('oauth_replace', name=current_binding.name)}}</p>{% endif %}
-    <p>{{t('oauth_agent_enable')}}</p>
-    <p class="muted">{{t('oauth_on_demand')}}</p>
-    <p class="muted">{{t('oauth_security')}}</p>
+    {% if current_binding %}<p class="error" data-i18n="oauth_replace" data-i18n-name="{{current_binding.name}}">{{t('oauth_replace', name=current_binding.name)}}</p>{% endif %}
+    <p data-i18n="oauth_agent_enable">{{t('oauth_agent_enable')}}</p>
+    <p class="muted" data-i18n="oauth_on_demand">{{t('oauth_on_demand')}}</p>
+    <p class="muted" data-i18n="oauth_security">{{t('oauth_security')}}</p>
     {% if signed_in %}
       <form id="oauth-decision-form" method="post" action="/oauth/authorize/decision">
         <input type="hidden" name="request_id" value="{{oauth_request.id}}">
         <input type="hidden" name="csrf_token" value="{{csrf}}">
-        <button type="submit" name="decision" value="approve" class="button">{{t('oauth_approve')}}</button>
-        <button type="submit" name="decision" value="deny" class="button">{{t('oauth_deny')}}</button>
+        <button type="submit" name="decision" value="approve" class="button" data-i18n="oauth_approve">{{t('oauth_approve')}}</button>
+        <button type="submit" name="decision" value="deny" class="button" data-i18n="oauth_deny">{{t('oauth_deny')}}</button>
       </form>
       <p id="oauth-status" class="form-status" role="status" aria-live="polite"></p>
     {% else %}
-      <p>{{t('oauth_login_note')}}</p>
+      <p data-i18n="oauth_login_note">{{t('oauth_login_note')}}</p>
       <form id="oauth-login-form">
-        <label for="oauth-email">{{t('email_label')}}</label>
+        <label for="oauth-email" data-i18n="email_label">{{t('email_label')}}</label>
         <input id="oauth-email" name="email" type="email" autocomplete="email" required>
-        <button type="submit" class="button">{{t('send_code')}}</button>
+        <button type="submit" class="button" data-i18n="send_code">{{t('send_code')}}</button>
       </form>
       <form id="oauth-code-form" data-request-id="{{oauth_request.id}}" hidden>
-        <label for="oauth-code">{{t('code_label')}}</label>
+        <label for="oauth-code" data-i18n="code_label">{{t('code_label')}}</label>
         <input id="oauth-code" name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required>
-        <button type="submit" class="button">{{t('verify_continue')}}</button>
+        <button type="submit" class="button" data-i18n="verify_continue">{{t('verify_continue')}}</button>
+        <p id="oauth-code-target" class="muted" hidden></p>
         <p class="mail-hint" data-mail-sender-notice data-mail-sender="{{mail_sender}}">{{t('mail_sender_notice', email=mail_sender)}}</p>
       </form>
       <p id="oauth-status" class="form-status" role="status" aria-live="polite"></p>
-      <p class="muted">{{t('code_note')}}</p>
+      <p class="muted" data-i18n="code_note">{{t('code_note')}}</p>
     {% endif %}
   {% else %}
-    <h1>{{t('oauth_title')}}</h1>
-    <p class="error">{{t('oauth_invalid')}}</p>
-    <a class="button" href="/app">{{t('back_account')}}</a>
+    <h1 data-i18n="oauth_title">{{t('oauth_title')}}</h1>
+    <p class="error" data-i18n="oauth_invalid">{{t('oauth_invalid')}}</p>
+    <a class="button" href="/app" data-i18n="back_account">{{t('back_account')}}</a>
   {% endif %}
 </section>
 {% endblock %}

@@ -228,13 +228,9 @@ def test_account_email_rechecks_consent_at_dispatch_transaction(harness, monkeyp
     assert injected and transport.mail_calls == []
 
 
-@pytest.mark.parametrize("policy,count", [("fallback", 0), ("always", 1)])
-def test_account_mail_fallback_observes_processing_receipt(
-    harness, bind_agent, policy, count
-):
+def test_account_mail_is_independent_of_agent_processing(harness, bind_agent):
     service, client, user, sub = subscriber(harness)
     _, auth = bind_agent(client)
-    service.preferences(user["id"], sub["id"], {"email_policy": policy})
     service.db.execute(
         "UPDATE subscriptions SET expires_at=? WHERE id=?", (time.time() - 1, sub["id"])
     )
@@ -244,7 +240,7 @@ def test_account_mail_fallback_observes_processing_receipt(
     )
     transport = NoticeTransport()
     Worker(service, transport).deliver(delivery["id"])
-    assert len(transport.mail_calls) == count
+    assert len(transport.mail_calls) == 1
 
 
 def test_old_webhook_does_not_receive_account_notice_after_binding_revocation(
@@ -381,3 +377,17 @@ def test_failed_account_email_can_be_replayed_only_to_its_owner(harness):
         ]
         == "accepted"
     )
+
+
+def test_account_notice_without_preference_defaults_to_immediate_email(harness):
+    service, _, user, sub = subscriber(harness)
+    service.db.execute(
+        "DELETE FROM delivery_preferences WHERE subscription_id=?", (sub["id"],)
+    )
+    event_id, delivery = notice(service, user["id"], identity="missing-pref")
+    job = service.db.one(
+        "SELECT * FROM jobs WHERE kind='account_mail' AND json_extract(payload,'$.delivery_id')=?",
+        (delivery["id"],),
+    )
+    assert job is not None
+    assert job["available_at"] <= time.time() + 5

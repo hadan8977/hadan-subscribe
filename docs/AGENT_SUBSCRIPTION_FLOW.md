@@ -1,6 +1,6 @@
 # Agent 订阅流程：Prompt 与 Skill
 
-更新时间：2026-10-30。以下为通用接入说明，套餐、价格和日期以站点实时返回为准。
+更新时间：2026-10-30。公开站点已上线。
 
 ## 给 Agent 的 Prompt
 
@@ -31,19 +31,13 @@
 
 ChatGPT 首次连接通过 OAuth 完成：自定义 connector 指向 `https://quant.example.com/mcp`，浏览器内验证 owner 邮箱后自动完成首次授权，不需要再点同意。OAuth token 由平台保存，不进入对话上下文。详见 [MCP_CONNECTOR.md](MCP_CONNECTOR.md)。
 
-## 当前套餐
+## 套餐与报价
 
-Agent 必须调用 `GET /api/purchase-options` 或 MCP `get_subscription_status` 获取实时套餐；不要从文档硬编码价格、日期、支付方式或套餐 ID。站点返回的 `subscribe_url` 是 owner 手动购买时的备用入口。
+Agent 必须调用 `GET /api/purchase-options` 或 MCP `get_subscription_status` 获取实时套餐；不得从文档、Prompt 或历史对话硬编码价格、币种、期限或支付方式。每个方案返回 `quote_id`，它绑定方案、价格、期限和当前条款版本。用户确认后，`prepare_checkout` 同时提交 `plan_id`、`method`、`accept_terms=true`、`terms_version` 和 `quote_id`；报价变化时服务端返回 `quote_changed`，必须重新展示并重新取得用户确认。
 
 ## 语言规则
 
-Agent 侧获取的 Quant 信息必须全英文，包括方案名、价格、日期、状态、错误、说明和摘要。
-
-- 默认英文。
-- 如果运行环境明确提供用户语言环境，可以只用该语言进行对话，但 Quant 的服务数据、价格、日期、状态和标识符保持英文。
-- 没有语言环境时直接使用英文。
-
-以上规则写入 `/skill.md` 和 `/agent/instructions`；`/agent/prompt` 只保留一句英文起始指令和网址，不承载完整规则。
+使用 owner 的对话语言解释方案、状态、错误和摘要；API 字段名、方案 ID、订单 ID、币种、金额、时间戳和枚举值保持原样，不翻译、不改写。无法判断 owner 语言时使用简洁英文。该规则写入 `/skill.md`、`/agent/instructions` 和工具描述；`/agent/prompt` 只保留起始任务和网址。
 
 ## 交互逻辑
 
@@ -53,9 +47,9 @@ Agent 侧获取的 Quant 信息必须全英文，包括方案名、价格、日�
 2. 浏览器内验证 owner 邮箱。支持的远程连接器（ChatGPT、Grok、Cursor、Claude）首次连接会自动完成授权，不需要再点同意；loopback/自定义客户端以及替换现有连接时才会再次确认。OAuth token 由平台保存，不进入对话上下文。
 3. 若平台显示 `no_auth_link` 或无法弹授权卡片，不要声称已连接；立即回退到站点配对。首次连接在 owner 验证邮箱后自动完成，不需要再点配对授权。
 4. 调 `get_subscription_status`；它返回实时套餐、可用支付方式、`terms_version`、`terms_url` 和 `subscribe_url`。Agent 在对话里说明套餐、价格、支付方式和条款链接，请 owner 明确确认。
-5. Agent 调 `prepare_checkout`，传入 `plan_id`、`method`、`accept_terms=true`、`terms_version`（HTTP 客户端用 `POST /api/agent/checkout` 传同样 JSON）。服务端固定金额，不接受客户端金额或任意套餐。返回 PNG 二维码后直接把图片发给 owner；不要打开浏览器或云电脑，也不需要 owner 再去网页点授权按钮。客户端无法显示图片时用 `get_checkout_qr` / `GET /api/agent/checkout/qr` 下载后作为附件发送。
+5. Agent 调 `prepare_checkout`，传入 `plan_id`、`method`、`accept_terms=true`、`terms_version` 和方案 `quote_id`（HTTP 客户端用 `POST /api/agent/checkout` 传同样 JSON）。服务端固定金额，不接受客户端金额或任意套餐。返回 PNG 二维码后直接把图片发给 owner；不要打开浏览器或云电脑，也不需要 owner 再去网页点授权按钮。客户端无法显示图片时用 `get_checkout_qr` / `GET /api/agent/checkout/qr` 下载后作为附件发送。
 6. owner 扫码付款后，Agent 用 `get_checkout_status` 查询，`paid=true` 才算完成；轮询间隔不小于 5 秒。付款后确认订阅状态和 Agent delivery，再调 `events/subscribe`（需要 active subscription + agent delivery）。网页 `subscribe_url` 只作为备用手动流程。
-7. 不支持 MCP Events 时，按 `get_scan_schedule` 的 `checks_new_york` 在每次扫描后的检查窗口内查 `list_events()`；每个扫描最多 3 次（扫描后 10/20/30 分钟），不要 24 小时每 10 分钟轮询。交易日所有源扫描都在 09:30 前或 16:00 后（纽约时间），盘中不扫描；非交易日只在开盘前做一轮。若运行时只能固定间隔执行，必须用 `check_window_start_new_york`/`check_window_end_new_york` 过滤，窗口外直接跳过；空列表不通知。
+7. 不支持 MCP Events 时，按 `get_scan_schedule` 返回的 `checks[]` 在检查时刻查 `list_events()`；每个扫描最多 3 次（扫描后 10/20/30 分钟），按 `check_id` 去重，不要 24 小时每 10 分钟轮询。计划以服务端返回为准；扫描开始后重新获取仍会保留未到时的检查。默认交易日源扫描在 09:30 前或 16:00 后（纽约时间），自定义部署可能不同；Webhook 和邮件独立，可能在检查窗口之外到达，不能声称窗口外绝无新内容。若运行时只能固定间隔执行，必须用返回的检查时刻过滤；空列表不通知。
 
 ### 站点配对（HTTPS API 客户端）
 

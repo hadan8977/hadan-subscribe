@@ -18,7 +18,7 @@ MCP_SDK_PYTHON=/tmp/hadan-mcp-sdk-review/bin/python .venv/bin/python -m pytest -
 
 The SDK test starts the real application on an ephemeral loopback port, initializes the protocol, discovers tools, reads an event and private body, downloads two embedded attachments, acknowledges processing and verifies the pending list clears. It stops the local server afterward. It proves compatibility with that official SDK version; it does not prove background execution in a specific Personal Agent product or OAuth interoperability.
 
-Fault injection covers duplicate publishing, permanent local message identity, retry backoff, opt-out before retry, delivery acceptance versus processing, stale worker leases, uncertain SMTP state, two-worker claims, revision supersession and withheld fallback after an Agent acknowledgement. The SMTP cases use an injected transport or inspect recovery state without opening a SMTP connection.
+Fault injection covers duplicate publishing, permanent local message identity, retry backoff, opt-out before retry, delivery acceptance versus processing, stale worker leases, uncertain SMTP state, two-worker claims, revision supersession and email independence after an Agent acknowledgement. The SMTP cases use an injected transport or inspect recovery state without opening a SMTP connection.
 
 ## Portable browser review
 

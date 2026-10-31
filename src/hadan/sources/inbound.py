@@ -42,6 +42,7 @@ class SelectedMessage:
     mode: str
     identity: str
     proof: SignatureProof | None
+    subject_authenticated: bool = True
 
 
 class Budget:
@@ -94,6 +95,15 @@ def addresses(message, name):
 def sender_of(message):
     values = addresses(message, "From")
     return values[0] if len(values) == 1 else ""
+
+
+def mime_interpretation_headers(message) -> frozenset[str]:
+    """Outer headers that change how the signed bytes are interpreted."""
+    required = {"from"}
+    for name in ("content-type", "content-transfer-encoding"):
+        if message.get_all(name, []):
+            required.add(name)
+    return frozenset(required)
 
 
 def signature_fields(value):
@@ -232,12 +242,30 @@ def select_messages(raw, official_domains, curators=(), inbound_address="", *, o
         unambiguous(message)
         sender = sender_of(message)
         if sender and sender.rsplit("@", 1)[-1] in official_domains:
-            proof = verifier(candidate, sender)
+            base_required = mime_interpretation_headers(message)
+            strict_required = base_required | {"subject"}
+            try:
+                proof = verifier(candidate, sender, required_headers=strict_required)
+            except TypeError:
+                proof = verifier(candidate, sender)
+            if not proof:
+                # Some legitimate senders do not sign Subject. Accept only if
+                # the body-interpretation headers are still signed, and mark
+                # the subject as unauthenticated so it is never used as a title.
+                try:
+                    proof = verifier(candidate, sender, required_headers=base_required)
+                except TypeError:
+                    proof = verifier(candidate, sender)
             if not proof:
                 raise InboundRejected("Official sender DKIM verification failed")
+            subject_authenticated = (
+                "subject" in proof.signed_headers
+                if isinstance(proof, SignatureProof)
+                else True
+            )
             identity = stable_identity(candidate, message, sender, proof)
             if identity not in seen:
-                selected.append(SelectedMessage(candidate, sender, "official", identity, proof if isinstance(proof, SignatureProof) else None))
+                selected.append(SelectedMessage(candidate, sender, "official", identity, proof if isinstance(proof, SignatureProof) else None, subject_authenticated))
                 seen.add(identity)
             return True
         nested = list(attached_originals(candidate, budget, depth))
@@ -257,9 +285,12 @@ def select_messages(raw, official_domains, curators=(), inbound_address="", *, o
         return []
     if not inbound_address or inbound_address not in addresses(message, "To"):
         raise InboundRejected("Curated forwarding requires the explicit inbox alias in To")
-    proof = verify_signature(raw, sender, required_headers=frozenset({"from", "to", "subject"}))
+    curated_required = mime_interpretation_headers(message) | {"to", "subject"}
+    proof = verify_signature(raw, sender, required_headers=curated_required)
     if not proof:
-        raise InboundRejected("Curated forwarding requires signed From, To, Subject and full body")
+        raise InboundRejected(
+            "Curated forwarding requires signed From, To, Subject, MIME interpretation headers and full body"
+        )
     return [SelectedMessage(raw, sender, "curated", stable_identity(raw, message, sender, proof), proof)]
 
 

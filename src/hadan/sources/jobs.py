@@ -228,10 +228,10 @@ def weekly_digest(s):
     return result
 
 
-def authenticated_sender(raw, sender):
+def authenticated_sender(raw, sender, *, required_headers=None):
     """Return an aligned original-signature proof (falsey on verification failure)."""
     from .inbound import verify_signature
-    return verify_signature(raw, sender)
+    return verify_signature(raw, sender, required_headers=required_headers or frozenset({"from"}))
 
 
 def quarantine(s, identity, reason, raw=None):
@@ -279,7 +279,11 @@ def ingest_message(s, raw, source_identity):
             title = "管理员转发 · " + subject
             prefix = "curated:"
         else:
-            title = "Quant GT · " + subject
+            title = (
+                "Quant GT · " + subject
+                if item.subject_authenticated
+                else "Quant GT · 官方邮件更新"
+            )
             prefix = "official:"
         source_key = prefix + item.identity
         result = s.publish("quantgt", source_key, title, body, files=files)
@@ -555,10 +559,6 @@ def activate_parser(s, candidate, expected_sha):
 
     validate_member_picks_data(data)
     prior = state(s, "picks:accepted")
-    for name in ("monthly", "weekly"):
-        symbols = [row["symbol"] for row in data[name]["rows"]]
-        if len(symbols) != len(set(symbols)):
-            raise ValueError("Parser canary returned duplicate symbols")
     if prior:
         for name in ("monthly", "weekly"):
             if prior[name].get("pick_date") not in (None, "", "Unknown") and data[

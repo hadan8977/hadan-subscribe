@@ -224,20 +224,15 @@ def test_two_workers_cannot_claim_the_same_job(journey):
     )
 
 
-def test_fallback_mail_is_suppressed_after_agent_processed_event(journey):
+def test_email_is_sent_even_after_agent_processed_event(journey):
     reader = journey.login()
-    sub = journey.subscribe(reader)
-    journey.service.db.execute("UPDATE delivery_preferences SET email_policy='fallback' WHERE subscription_id=?", (sub["id"],))
+    journey.subscribe(reader)
     _, agent = journey.connect(reader)
     item = journey.service.publish("quantgt", "agent-first", "Agent first", "Body")
-    assert Worker(journey.service).run_once() is False, (
-        "Fallback has a delay while an Agent is active"
-    )
     assert agent.post(f"/api/events/{item['event_id']}/ack").status_code == 200
-    ready_retries(journey)
     journey.drain()
-    assert journey.messages(login=False) == []
-    assert journey.service.db.one("SELECT state FROM deliveries")["state"] == "skipped"
+    assert len(journey.messages(login=False)) == 1
+    assert journey.service.db.one("SELECT state FROM deliveries")["state"] == "accepted"
 
 
 def test_new_version_supersedes_queued_old_version_mail(journey):
@@ -377,31 +372,14 @@ def test_baseline_replay_creates_missing_delivery_then_deduplicates(journey):
     assert len(journey.messages(login=False)) == 1
 
 
-def test_agent_ack_committed_before_fallback_send_is_honored(journey, monkeypatch):
+def test_agent_ack_before_email_dispatch_does_not_cancel_email(journey):
     reader = journey.login()
-    sub = journey.subscribe(reader)
-    journey.service.db.execute("UPDATE delivery_preferences SET email_policy='fallback' WHERE subscription_id=?", (sub["id"],))
+    journey.subscribe(reader)
     binding, _ = journey.connect(reader)
     item = journey.service.publish("quantgt", "ack-race", "Report", "Body")
-    original_one = journey.service.db.one
-    acknowledged = False
-
-    def ack_after_receipt_read(sql, params=()):
-        nonlocal acknowledged
-        result = original_one(sql, params)
-        if "SELECT state FROM receipts" in sql and not acknowledged:
-            acknowledged = True
-            journey.service.ack(
-                journey.service.agent(binding["token"]), item["event_id"]
-            )
-        return result
-
-    # Agent finishes after the worker reads the pending snapshot but before sending starts.
-    monkeypatch.setattr(journey.service.db, "one", ack_after_receipt_read)
-    ready_retries(journey)
+    assert journey.service.ack(
+        journey.service.agent(binding["token"]), item["event_id"]
+    ) == {"state": "processed"}
     journey.drain()
-    assert acknowledged
-    assert journey.messages(login=False) == [], (
-        "Completed processing should cancel a fallback that has not begun"
-    )
-    assert journey.service.db.one("SELECT state FROM deliveries")["state"] == "skipped"
+    assert len(journey.messages(login=False)) == 1
+    assert journey.service.db.one("SELECT state FROM deliveries")["state"] == "accepted"

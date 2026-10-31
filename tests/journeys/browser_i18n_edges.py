@@ -9,9 +9,11 @@ import json
 import os
 import re
 import socket
+import subprocess
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -23,12 +25,20 @@ from playwright.sync_api import expect, sync_playwright
 from browser_smoke import select_chromium
 from hadan.config import Settings
 from hadan.db import uid
+from hadan.oauth import OAuth
 from hadan.web import create_app
 from hadan.worker import Worker
 
 
 def run():
-    results = {"checks": [], "page_errors": []}
+    results = {
+        "checks": [],
+        "page_errors": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[2], text=True
+        ).strip(),
+    }
     with tempfile.TemporaryDirectory(prefix="quant-ui-edges-") as temp:
         for _ in range(100):
             sock = socket.socket()
@@ -126,6 +136,95 @@ def run():
                     expect(page.locator("#check-payment")).to_have_count(0)
                     expect(page.locator("#purchase-submit")).to_be_enabled()
                     results["checks"].append("Closed order shows terminal outcome guidance without QR or stale payment polling")
+
+                    # A broken QR image must expose the payment link instead of a blank card.
+                    broken = {
+                        "id": "broken-qr",
+                        "status": "pending",
+                        "paid": False,
+                        "expires_at": time.time() + 600,
+                        "amount_minor": 100,
+                        "currency": "CNY",
+                        "qr_url": "/api/orders/broken-qr/qr",
+                        "pay_url": "https://example.test/pay",
+                    }
+                    page.unroute("**/api/purchase")
+                    page.route("**/api/purchase", lambda route: route.fulfill(json=broken))
+                    page.route("**/api/orders/broken-qr/qr", lambda route: route.fulfill(status=404, body=b""))
+                    page.goto(origin + "/app?view=subscriptions&lang=en")
+                    page.locator("#purchase-section summary").click()
+                    page.locator("#accept-terms").check()
+                    page.locator("#purchase-submit").click()
+                    expect(page.locator("#purchase-order .qr-fallback")).to_be_visible()
+                    expect(page.locator("#purchase-order .qr-fallback")).to_contain_text("QR code is unavailable")
+                    expect(page.locator('#purchase-order .qr-fallback a[href="https://example.test/pay"]')).to_be_visible()
+                    results["checks"].append("Failed QR image degrades to the payment link without hiding the order")
+
+                    # Lifetime access and a fixed offer already covered by the
+                    # account keep the order card available but hide new purchase.
+                    service.db.execute(
+                        "UPDATE subscriptions SET expires_at=NULL WHERE user_id=?", (user_id,)
+                    )
+                    page.unroute("**/api/purchase-options")
+                    page.route("**/api/purchase-options", lambda route: route.fulfill(json={
+                        "terms_version": "2026-10-28",
+                        "methods": [{"id": "wechat", "enabled": True}],
+                        "plans": [{"id": "test-only", "days": 30, "amount_minor": 100, "currency": "CNY"}],
+                    }))
+                    page.goto(origin + "/app?view=subscriptions&lang=en")
+                    expect(page.locator("#purchase-form")).to_be_hidden()
+                    expect(page.locator("#purchase-options")).to_contain_text("already covers")
+                    service.db.execute(
+                        "UPDATE subscriptions SET expires_at=? WHERE user_id=?",
+                        (time.time() + 86400, user_id),
+                    )
+                    page.unroute("**/api/purchase-options")
+                    page.route("**/api/purchase-options", lambda route: route.fulfill(json={
+                        "terms_version": "2026-10-28",
+                        "methods": [{"id": "wechat", "enabled": True}],
+                        "plans": [{"id": "fixed", "access_until": time.time() + 3600, "days": 0, "amount_minor": 100, "currency": "CNY"}],
+                    }))
+                    page.goto(origin + "/app?view=subscriptions&lang=en")
+                    expect(page.locator("#purchase-form")).to_be_hidden()
+                    expect(page.locator("#purchase-options")).to_contain_text("already covers")
+                    results["checks"].append("Lifetime and already-covered fixed offers hide duplicate purchase while access remains readable")
+                    # OAuth page static and dynamic status must switch language without losing input.
+                    oauth = OAuth(service)
+                    client_id = "ui-edge-client"
+                    redirect_uri = "https://chatgpt.com/connector/oauth/ui-edge"
+                    service.db.execute(
+                        "INSERT INTO oauth_clients VALUES(?,?,?,?,?,?)",
+                        (client_id, "UI edge client", json.dumps([redirect_uri]), "none", time.time(), time.time()),
+                    )
+                    request_id = oauth.start(
+                        {
+                            "response_type": "code",
+                            "client_id": client_id,
+                            "redirect_uri": redirect_uri,
+                            "code_challenge": "A" * 43,
+                            "code_challenge_method": "S256",
+                            "resource": origin,
+                            "scope": "quant.read offline_access",
+                            "state": "ui-edge",
+                        },
+                        "127.0.0.1",
+                    )
+                    anonymous = browser.new_context(locale="en", viewport={"width": 1280, "height": 900})
+                    anonymous.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin + "/") else route.abort())
+                    oauth_page = anonymous.new_page()
+                    oauth_page.on("pageerror", lambda error: results["page_errors"].append(str(error)))
+                    oauth_page.goto(origin + "/oauth/authorize?request_id=" + request_id + "&lang=en")
+                    expect(oauth_page.locator("h1")).to_have_text("Connect an agent")
+                    expect(oauth_page.locator("main")).to_contain_text("Read your Quant reports")
+                    oauth_page.locator("#oauth-email").fill("oauth-edge@example.test")
+                    oauth_page.locator("#oauth-login-form button[type=submit]").click()
+                    expect(oauth_page.locator("#oauth-status")).to_contain_text("Code sent to oauth-edge@example.test")
+                    oauth_page.locator('[data-language="zh-CN"]').click()
+                    expect(oauth_page.locator("h1")).to_have_text("连接 Agent")
+                    expect(oauth_page.locator("#oauth-status")).to_contain_text("验证码已发送至 oauth-edge@example.test")
+                    assert oauth_page.locator("#oauth-email").input_value() == "oauth-edge@example.test"
+                    anonymous.close()
+                    results["checks"].append("OAuth static text and dynamic code-sent status switch language while preserving the entered email")
                     page.locator("#logout").click()
                     expect(page.locator("#login")).to_be_visible()
                     page.goto(origin+"/app?"+urlencode({"next":"https://untrusted.example.test/read/"+item["id"],"lang":"en"}))

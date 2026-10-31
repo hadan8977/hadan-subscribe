@@ -366,21 +366,6 @@ class Worker:
                     "SELECT email FROM suppressions WHERE email=?", (user["email"],)
                 )
             )
-            pref = (
-                self.db.one(
-                    "SELECT email_policy FROM delivery_preferences WHERE subscription_id=?",
-                    (s["id"],),
-                )
-                if s
-                else None
-            )
-            if pref and pref["email_policy"] == "fallback" and s["agent_enabled"]:
-                r = self.db.one(
-                    "SELECT state FROM receipts WHERE user_id=? AND event_id=?",
-                    (d["user_id"], d["event_id"]),
-                )
-                if r and r["state"] == "processed":
-                    skip = True
         else:
             b = self.db.one(
                 "SELECT * FROM bindings WHERE id=? AND user_id=? AND state='active'",
@@ -420,23 +405,6 @@ class Worker:
                         "SELECT email FROM suppressions WHERE email=?", (user["email"],)
                     ).fetchone()
                 )
-                pref = db.execute(
-                    "SELECT email_policy FROM delivery_preferences WHERE subscription_id=?",
-                    (s["id"],),
-                ).fetchone()
-                receipt = db.execute(
-                    "SELECT state FROM receipts WHERE user_id=? AND event_id=?",
-                    (d["user_id"], d["event_id"]),
-                ).fetchone()
-                if (
-                    pref
-                    and pref["email_policy"] == "fallback"
-                    and fresh
-                    and fresh["agent_enabled"]
-                    and receipt
-                    and receipt["state"] == "processed"
-                ):
-                    allowed = False
             content = db.execute(
                 "SELECT withdrawn,current_version FROM contents WHERE id=?",
                 (d["content_id"],),
@@ -583,26 +551,6 @@ class Worker:
                         "SELECT email FROM suppressions WHERE email=?", (user["email"],)
                     ).fetchone()
                 )
-                pref = (
-                    db.execute(
-                        "SELECT email_policy FROM delivery_preferences WHERE subscription_id=?",
-                        (sub["id"],),
-                    ).fetchone()
-                    if sub
-                    else None
-                )
-                receipt = db.execute(
-                    "SELECT state FROM receipts WHERE user_id=? AND event_id=?",
-                    (d["user_id"], d["event_id"]),
-                ).fetchone()
-                if (
-                    sub
-                    and sub["agent_enabled"]
-                    and (not pref or pref[0] == "fallback")
-                    and receipt
-                    and receipt[0] == "processed"
-                ):
-                    allowed = False
             db.execute(
                 "UPDATE deliveries SET state=?,attempts=attempts+1,updated_at=? WHERE id=?",
                 ("sending" if allowed else "skipped", time.time(), d["id"]),

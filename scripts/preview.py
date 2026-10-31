@@ -65,19 +65,27 @@ def build_pages():
         ("preview-desktop-content", "报告与附件", "Report and attachments"),
         ("preview-desktop-admin", "管理后台", "Admin dashboard"),
     ]
+    available_shots = [
+        (name, zh, en) for name, zh, en in shot_labels
+        if (ROOT / "docs/assets" / (name + ".png")).is_file()
+    ]
     for lang in ("zh-CN", "en"):
         for path, name in (("/", "index.html"), ("/app", "app.html"), ("/agent", "agent.html"), ("/terms", "terms.html"), ("/preview", None), ("/preview/agent", "agent-demo.html"), ("/read/00000000000000000000000000000001", "report-demo.html")):
             request = Request({"type": "http", "scheme": "http", "path": path,
                 "query_string": ("lang=" + lang).encode(), "headers": [],
                 "server": ("preview.invalid", 80)})
             context = template_context(request)
-            context.update(development=False, products=[], base_url="",
-                gallery_title=gallery_names[lang], gallery_note=notes[lang],
-                shots=[(n, zh if lang == "zh-CN" else en) for n, zh, en in shot_labels])
+            context.update(development=False, products=[], base_url="", support_contact="support@example.invalid",
+                gallery_title=gallery_names[lang],
+                gallery_note=notes[lang] + ("" if available_shots else (" · 未随仓库提供历史截图。" if lang == "zh-CN" else " · Historical screenshots are not included in this checkout.")),
+                shots=[(n, zh if lang == "zh-CN" else en) for n, zh, en in available_shots])
             context["ui_strings"] = {key: {**strings, "preview_note": notes[key],
                 "preview_gallery": gallery_names[key], **{name: pair[0 if key == "zh-CN" else 1] for name, pair in demo_words.items()}} for key, strings in context["ui_strings"].items()}
             original_translate = context["t"]
-            context["t"] = lambda key, lang=lang, original=original_translate: (demo_words[key][0 if lang == "zh-CN" else 1] if key in demo_words else original(key))
+            def preview_t(key, lang=lang, original=original_translate, **values):
+                text = demo_words[key][0 if lang == "zh-CN" else 1] if key in demo_words else original(key)
+                return text.format(**values) if values else text
+            context["t"] = preview_t
             html = (templates.get_template(name) if name else gallery).render(**context)
             html = html.replace('<body data-page=', '<body data-preview="true" data-page=', 1)
             html = html.replace('</head>', '<link rel="stylesheet" href="/preview-assets/preview.css"></head>', 1)
@@ -108,8 +116,10 @@ def build_pages():
             document = preview_rule + document
         assets[route] = (document.encode(), mime)
     assets["/llms.txt"] = ((preview_rule + "# Quant\n\n- [Agent Skill](/skill.md): public onboarding instructions.\n- [Human flow demo](/app?flow=subscribe)\n- [Agent conversation demo](/preview/agent)\n").encode(), "text/plain")
-    for name, _, _ in shot_labels:
-        assets["/preview-assets/" + name + ".png"] = ((ROOT / "docs/assets" / (name + ".png")).read_bytes(), "image/png")
+    for name, _, _ in available_shots:
+        path = ROOT / "docs/assets" / (name + ".png")
+        if path.is_file():
+            assets["/preview-assets/" + name + ".png"] = (path.read_bytes(), "image/png")
     return pages, assets
 
 

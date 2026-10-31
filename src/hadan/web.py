@@ -27,6 +27,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Settings
 from .db import audit, enqueue, uid
 from .mcp_events import CallbackError, MCPEvents
+from .mcp_tools import TOOL_SCOPES, TOOLS, ToolArgumentError, validate_arguments
 from .oauth import OAuth, OAuthError
 from .security import digest, mac, token
 from .service import Problem, Service
@@ -62,6 +63,7 @@ def create_app(settings=None):
     app.mount("/static", StaticFiles(directory=root / "static"), name="static")
     templates = Jinja2Templates(directory=root / "templates", context_processors=[template_context])
     templates.env.globals["mail_sender"] = cfg.mail_sender
+    templates.env.globals["support_contact"] = cfg.support_contact
 
     @app.exception_handler(Problem)
     async def problem_handler(request, exc):
@@ -76,7 +78,10 @@ def create_app(settings=None):
                 },
                 status_code=exc.status,
             )
-        return JSONResponse({"error": translate_error(exc.message, request)}, status_code=exc.status)
+        body = {"error": translate_error(exc.message, request)}
+        if getattr(exc, "data", None) is not None:
+            body["data"] = exc.data
+        return JSONResponse(body, status_code=exc.status)
 
     @app.exception_handler(OAuthError)
     async def oauth_handler(request, exc):
@@ -619,6 +624,7 @@ def create_app(settings=None):
         pending: bool = False,
         newest: bool = False,
         before: int | None = None,
+        include_webhook: bool = False,
     ):
         user_id, is_agent = principal(request)
         binding_id = agent(request)["id"] if request.headers.get("authorization") else None
@@ -631,6 +637,7 @@ def create_app(settings=None):
             newest=newest,
             before=before,
             binding_id=binding_id,
+            include_webhook=include_webhook,
         )
         return {
             "events": rows,
@@ -929,8 +936,24 @@ def create_app(settings=None):
                 data["client_secret"] = client_secret
             except (ValueError, UnicodeDecodeError):
                 raise OAuthError("invalid_client", "Malformed client authentication", 401) from None
+        result = oauth.token(data)
+        if diagnostic_logger is not None:
+            diagnostic_logger.info(
+                json.dumps(
+                    {
+                        "oauth_token_issued": {
+                            "grant_type": data.get("grant_type"),
+                            "client_id": data.get("client_id"),
+                            "scope": result.get("scope"),
+                            "refresh_issued": bool(result.get("refresh_token")),
+                            "expires_in": result.get("expires_in"),
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+            )
         return JSONResponse(
-            oauth.token(data),
+            result,
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
@@ -979,6 +1002,73 @@ def create_app(settings=None):
             headers={"WWW-Authenticate": MCP_CHALLENGE},
         )
 
+    BUSINESS_NEXT_ACTION = {
+        "subscription_required": (
+            "The owner's subscription is inactive or expired. Call "
+            "get_subscription_status, present the live plan and terms, and ask "
+            "the owner to confirm a checkout; do not reconnect another account."
+        ),
+        "agent_delivery_disabled": (
+            "Agent delivery is off for this account. Ask the owner to enable it "
+            "at " + cfg.base_url.rstrip("/") + "/app?view=connections."
+        ),
+        "access_denied": (
+            "This account is not allowed to use the service. Do not switch "
+            "accounts or bypass the refusal."
+        ),
+    }
+
+    def mcp_tool_error(identifier, exc):
+        """Return a business refusal without pretending the login expired."""
+        code = getattr(exc, "code", None) or {
+            400: "invalid_request",
+            402: "payment_required",
+            403: "forbidden",
+            404: "not_found",
+            409: "conflict",
+            410: "gone",
+            429: "rate_limited",
+            503: "temporarily_unavailable",
+        }.get(getattr(exc, "status", 400), "request_failed")
+        text = translate_error(getattr(exc, "message", str(exc)), "en")
+        next_action = BUSINESS_NEXT_ACTION.get(code)
+        if next_action:
+            text += " " + next_action
+        result = {
+            "isError": True,
+            "content": [{"type": "text", "text": text}],
+            "_meta": {
+                "quant/error": {
+                    "code": code,
+                    "status": getattr(exc, "status", 400),
+                    "next_action": next_action,
+                }
+            },
+        }
+        return {"jsonrpc": "2.0", "id": identifier, "result": result}
+
+    def mcp_invalid_params(identifier, exc):
+        return {
+            "jsonrpc": "2.0",
+            "id": identifier,
+            "error": {
+                "code": -32602,
+                "message": "Invalid params",
+                "data": {
+                    "code": "invalid_params",
+                    "field": getattr(exc, "field", None),
+                    "message": getattr(exc, "message", str(exc)),
+                },
+            },
+        }
+
+    def mcp_unknown_tool(identifier):
+        return {
+            "jsonrpc": "2.0",
+            "id": identifier,
+            "error": {"code": -32601, "message": "Unknown tool"},
+        }
+
     @app.get("/mcp")
     @app.get("/mcp/")
     def mcp_probe(request: Request):
@@ -986,14 +1076,6 @@ def create_app(settings=None):
         # 405 here makes connector validation fail before the consent page.
         # This is a closed, empty SSE probe and exposes no data.
         authorization = request.headers.get("authorization", "")
-        if diagnostic_logger is not None and method == "events/subscribe":
-            diagnostic_logger.info(json.dumps({
-                "mcp_event_subscribe_received": {
-                    "id_present": identifier is not None,
-                    "params_type": type(params_obj).__name__,
-                    "auth_present": bool(authorization),
-                }
-            }, ensure_ascii=False))
         if authorization:
             if not authorization.startswith("Bearer "):
                 return mcp_unauthorized()
@@ -1055,7 +1137,16 @@ def create_app(settings=None):
         )
         can_read_without_subscription = (
             method in MCP_PUBLIC_METHODS
-            or requested_tool in ("get_subscription_status", "get_scan_schedule")
+            or requested_tool
+            in (
+                "get_subscription_status",
+                "get_scan_schedule",
+                # Account notices remain readable/acknowledgeable after expiry;
+                # Service.events/ack still filter to account:* and require the
+                # account's own receipt and agent-enabled preference.
+                "list_events",
+                "ack_event",
+            )
             or checkout_tool
         )
         authorization = request.headers.get("authorization", "")
@@ -1074,7 +1165,7 @@ def create_app(settings=None):
                 if exc.status == 401:
                     return mcp_unauthorized()
                 if method == "tools/call":
-                    return mcp_tool_challenge(identifier)
+                    return mcp_tool_error(identifier, exc)
                 return {
                     "jsonrpc": "2.0",
                     "id": identifier,
@@ -1090,170 +1181,14 @@ def create_app(settings=None):
         if b is not None and b.get("oauth_scope") is not None:
             scopes = set((b.get("oauth_scope") or "").split())
             if method == "tools/call":
-                required = "quant.ack" if requested_tool == "ack_event" else "quant.read"
+                required = TOOL_SCOPES.get(requested_tool, "quant.read")
                 if required not in scopes:
                     return mcp_tool_challenge(identifier)
             elif method in ("events/subscribe", "events/unsubscribe") and "quant.read" not in scopes:
                 if diagnostic_logger is not None and method == "events/subscribe":
                     diagnostic_logger.info(json.dumps({"mcp_event_subscribe_scope_error": {"scope": b.get("oauth_scope")}}, ensure_ascii=False))
                 return mcp_tool_challenge(identifier)
-        tools = [
-            {
-                "name": "get_subscription_status",
-                "description": "Read this account's Quant subscription status and the live subscribe URL. This is safe before purchase and does not change anything.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "get_scan_schedule",
-                "description": "Read upcoming Quant scan times and the exact 1-3 check times after each scan. Poll only inside those check windows; never run a 24/7 every-10-minute loop. It changes nothing.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "prepare_checkout",
-                "description": "Prepare a QR checkout after the owner explicitly confirms the live plan, price, payment method and terms in chat. Pass plan_id, method, accept_terms=true and terms_version from get_subscription_status. The server fixes the amount; no client amount or user field is accepted. Returns a PNG QR image to show inline. Never open a browser or cloud computer.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "plan_id": {"type": "string"},
-                        "method": {"type": "string", "enum": ["wechat", "alipay"]},
-                        "accept_terms": {"type": "boolean"},
-                        "terms_version": {"type": "string"},
-                    },
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": False,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "get_checkout_status",
-                "description": "Read the active checkout status. Poll no faster than every 5 seconds while waiting for payment. paid=true is the only confirmation of payment; this tool never charges.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "get_checkout_qr",
-                "description": "Return the current checkout QR as a PNG image. Use this if the image from prepare_checkout was not displayed. Never send the owner to a cloud browser.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "list_events",
-                "description": "Read pending private Quant events. Use this for on-demand checks; MCP Events handles push delivery.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"after": {"type": "integer"}},
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "read_content",
-                "description": "Read authorized report content and its attachment manifest.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "content_id": {"type": "string"},
-                        "version": {"type": "integer"},
-                    },
-                    "required": ["content_id"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "read_attachment",
-                "description": "Download one private attachment as an embedded base64 resource.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"attachment_id": {"type": "string"}},
-                    "required": ["attachment_id"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.read"]}],
-            },
-            {
-                "name": "ack_event",
-                "description": "Acknowledge ONLY after the report content and all attachments were processed or saved.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"event_id": {"type": "string"}},
-                    "required": ["event_id"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": False,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-                "securitySchemes": [{"type": "oauth2", "scopes": ["quant.ack"]}],
-            },
-        ]
+        tools = TOOLS
 
         def ok(value):
             return {
@@ -1288,13 +1223,6 @@ def create_app(settings=None):
                 "id": identifier,
                 "result": {"content": content},
             }
-
-        def tool_error(exc):
-            text = translate_error(getattr(exc, "message", str(exc)), "en")
-            result = {"isError": True, "content": [{"type": "text", "text": text}]}
-            if getattr(exc, "status", None) == 401:
-                result["_meta"] = {"mcp/www_authenticate": [MCP_CHALLENGE]}
-            return {"jsonrpc": "2.0", "id": identifier, "result": result}
 
         try:
             if method == "server/discover":
@@ -1399,7 +1327,12 @@ def create_app(settings=None):
             elif method == "tools/call":
                 params = params_obj
                 name = params.get("name")
-                a = params.get("arguments", {})
+                if not isinstance(name, str) or name not in TOOL_SCOPES:
+                    return mcp_unknown_tool(identifier)
+                try:
+                    a = validate_arguments(name, params.get("arguments", {}))
+                except ToolArgumentError as exc:
+                    return mcp_invalid_params(identifier, exc)
                 if name == "get_subscription_status":
                     from .commerce import Commerce
                     from .terms import TERMS_VERSION
@@ -1438,6 +1371,7 @@ def create_app(settings=None):
                         "terms_version": TERMS_VERSION,
                         "terms_url": cfg.base_url.rstrip("/") + "/terms",
                         "mail_sender": cfg.mail_sender,
+                        "support_contact": cfg.support_contact,
                         "payment_by": "owner",
                         "automatic_renewal": False,
                     }
@@ -1451,25 +1385,26 @@ def create_app(settings=None):
                     checkout = AgentCheckout(s)
                     if a:
                         return ok_image(
-                            checkout.start(
+                            await run_in_threadpool(
+                                checkout.start,
                                 b,
                                 a,
                                 request.client.host if request.client else "unknown",
                             )
                         )
-                    return ok_image(checkout.prepare(b))
+                    return ok_image(await run_in_threadpool(checkout.prepare, b))
                 elif name == "get_checkout_status":
                     from .agent_checkout import AgentCheckout
 
-                    value = AgentCheckout(s).status(b)
+                    value = await run_in_threadpool(AgentCheckout(s).status, b)
                 elif name == "get_checkout_qr":
                     from .agent_checkout import AgentCheckout
 
                     checkout = AgentCheckout(s)
-                    value = checkout.status(b)
+                    value = await run_in_threadpool(checkout.status, b)
                     if not value.get("qr_available"):
                         raise Problem("付款二维码尚未生成", 409)
-                    raw = checkout.qr(b)
+                    raw = await run_in_threadpool(checkout.qr, b)
                     metadata = {
                         key: value.get(key)
                         for key in (
@@ -1506,6 +1441,7 @@ def create_app(settings=None):
                             pending=True,
                             agent=True,
                             binding_id=b["id"],
+                            include_webhook=bool(a.get("include_webhook", False)),
                         )
                     }
                 elif name == "read_content":
@@ -1545,8 +1481,8 @@ def create_app(settings=None):
                     "id": identifier,
                     "error": {"code": -32601, "message": "Method not found"},
                 }
-        except (Problem, ValueError, KeyError, TypeError) as exc:
-            return tool_error(exc)
+        except Problem as exc:
+            return mcp_tool_error(identifier, exc)
         return {"jsonrpc": "2.0", "id": identifier, "result": result}
 
     @app.get("/api/admin/status")
@@ -1661,6 +1597,7 @@ def create_app(settings=None):
             "terms_version": TERMS_VERSION,
             "terms_url": cfg.base_url.rstrip("/") + "/terms",
             "mail_sender": cfg.mail_sender,
+            "support_contact": cfg.support_contact,
             "agent_payment_methods": [
                 item["id"]
                 for item in options["methods"]
@@ -1681,9 +1618,44 @@ def create_app(settings=None):
         from .terms import begin_agreement
         u = user(request, write=True)
         p = await payload(request)
+        quote_id = p.get("quote_id")
+        if quote_id is not None:
+            plan = next(
+                (item for item in Commerce(s).plans() if item["id"] == p.get("plan_id")),
+                None,
+            )
+            if (
+                not isinstance(quote_id, str)
+                or not plan
+                or not hmac.compare_digest(quote_id, plan["quote_id"])
+            ):
+                raise Problem(
+                    "报价已更新，请重新确认",
+                    409,
+                    code="quote_changed",
+                    data={"quote_changed": True},
+                )
         agreement_id = begin_agreement(s, u["id"], "purchase", p)
         return await run_in_threadpool(Commerce(s).create_order, u["id"], p.get("plan_id"), p.get("method"), agreement_id=agreement_id,
                                        payer_ip=request.client.host)
+
+    @app.get("/api/orders")
+    def purchase_orders(request: Request):
+        """Owner-visible recent orders used to recover an uncertain POST/refresh."""
+        from .commerce import Commerce
+
+        owner = user(request)
+        rows = s.db.all(
+            "SELECT id FROM purchase_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10",
+            (owner["id"],),
+        )
+        orders = []
+        for row in rows:
+            try:
+                orders.append(Commerce(s).order(owner["id"], row["id"]))
+            except Problem:
+                continue
+        return {"orders": orders}
 
     @app.get("/api/orders/{order_id}")
     def purchase_status(request: Request, order_id: str):

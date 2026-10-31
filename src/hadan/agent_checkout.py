@@ -25,6 +25,14 @@ class AgentCheckout:
         plan = next((p for p in Commerce(self.s).plans() if p["id"] == payload.get("plan_id")), None)
         if not plan or not plan.get("access_until"):
             raise Problem("订阅方案不存在", 404)
+        quote_id = payload.get("quote_id")
+        if quote_id is not None and quote_id != plan.get("quote_id"):
+            raise Problem(
+                "报价已更新，请重新确认",
+                409,
+                code="quote_changed",
+                data={"quote_changed": True},
+            )
         if self.s.db.one(
             "SELECT id FROM purchase_orders WHERE user_id=? AND "
             "(status IN ('verifying','review') OR (status IN ('creating','pending') AND expires_at>?))",
@@ -59,7 +67,7 @@ class AgentCheckout:
         fixes the plan, amount and method from its own catalog; the agent can
         only choose among published options, and the owner must still pay.
         """
-        allowed = {"plan_id", "method", "accept_terms", "terms_version"}
+        allowed = {"plan_id", "method", "accept_terms", "terms_version", "quote_id"}
         if not isinstance(payload, dict) or not payload or set(payload) - allowed:
             raise Problem("付款参数无效", 400)
         existing = self.s.db.one(

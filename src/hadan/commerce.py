@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -122,7 +123,25 @@ class Commerce:
             seen.add(raw["id"])
             result.append({"id": raw["id"], "title": str(raw.get("title", "Quant"))[:80],
                            "days": raw.get("days", 0), "amount_minor": raw["amount_minor"], "currency": "CNY", **extra})
+        for plan in result:
+            plan["quote_id"] = self.quote_id(plan)
         return result
+
+    def quote_id(self, plan):
+        """Bind a displayed plan to its price, term and current legal version."""
+        from .terms import TERMS_VERSION
+
+        fields = {
+            "id": plan["id"],
+            "amount_minor": plan["amount_minor"],
+            "currency": plan["currency"],
+            "days": plan.get("days", 0),
+            "access_until": plan.get("access_until"),
+        }
+        return digest(
+            json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            + "|" + TERMS_VERSION
+        )[:32]
 
     def provider_ready(self, *, receive_existing=False):
         if self.cfg.xiaodou_enabled and not receive_existing:

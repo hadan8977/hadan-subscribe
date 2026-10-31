@@ -57,7 +57,7 @@ def signer(monkeypatch):
             b"fixture",
             domain,
             pem,
-            include_headers=[b"from", b"to", b"subject", b"message-id"],
+            include_headers=[b"from", b"to", b"subject", b"message-id", b"content-type", b"mime-version"],
             length=length,
         )
         return signature + raw

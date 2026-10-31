@@ -600,21 +600,31 @@ def dismiss_screenshot_overlays(page) -> None:
 def _assert_screenshot_symbols_match(
     page, name: str, expected_rows: List[Dict[str, Any]]
 ) -> None:
-    expected_symbols = [
-        str(row.get("symbol") or "").strip().upper()
-        for row in expected_rows
-        if row.get("symbol")
-    ]
-    page_rows = rows_from_table(page, name)
-    page_symbols = [
-        str(row.get("symbol") or "").strip().upper()
-        for row in page_rows
-        if row.get("symbol")
-    ]
+    """Require the screenshot page to show the same stable fields as the capture.
+
+    The page is loaded a second time for screenshots. If the source changes a
+    score, date/edition or sector between the text capture and that second load
+    while keeping the same symbols, the Excel/body would otherwise mix two
+    editions. Dynamic prices are intentionally not required to match.
+    """
+    expected = [row for row in expected_rows if row.get("symbol")]
+    page_rows = [row for row in rows_from_table(page, name) if row.get("symbol")]
     if name == "weekly":
-        expected_symbols = expected_symbols[:10]
-        page_symbols = page_symbols[:10]
+        expected = expected[:10]
+        page_rows = page_rows[:10]
+    expected_symbols = [str(row.get("symbol")).strip().upper() for row in expected]
+    page_symbols = [str(row.get("symbol")).strip().upper() for row in page_rows]
     if expected_symbols != page_symbols:
         raise RuntimeError(
             f"{name} screenshot symbols mismatch: expected={expected_symbols} actual={page_symbols}"
         )
+    stable_fields = ("company", "gt_score", "sector", "rating", "held_since")
+    for index, (wanted, actual) in enumerate(zip(expected, page_rows)):
+        for field in stable_fields:
+            old = str(wanted.get(field) or "").strip()
+            new = str(actual.get(field) or "").strip()
+            if old and old.casefold() != new.casefold():
+                raise RuntimeError(
+                    f"{name} screenshot changed {field} at row {index + 1} "
+                    f"({wanted.get('symbol')}): capture={old!r} screenshot={new!r}"
+                )

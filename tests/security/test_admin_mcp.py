@@ -144,6 +144,23 @@ def test_database_allowlist_controls_invite_gate(admin):
     assert admin._email_allowed("invited@example.com") is True
 
 
+def test_list_deliveries_limit_and_email_filter(admin):
+    payload(
+        mcp_server.add_member(
+            "delivery@example.com", days=30, email_consent=True, confirm=True
+        )
+    )
+    admin.publish("quantgt", "delivery-list", "Delivery list", "Body")
+
+    listed = payload(mcp_server.list_deliveries(email="delivery@example.com", limit=1))
+    assert listed["count"] == 1
+    assert listed["deliveries"][0]["email"] == "delivery@example.com"
+
+    # Out-of-range limits are clamped rather than raising UnboundLocalError.
+    assert payload(mcp_server.list_deliveries(limit=0))["count"] == 1
+    assert payload(mcp_server.list_deliveries(limit=999))["count"] == 1
+
+
 def test_writes_require_confirm(admin):
     payload(mcp_server.add_member("dry@example.com", days=30))
     assert admin.db.one("SELECT id FROM users WHERE email='dry@example.com'") is None

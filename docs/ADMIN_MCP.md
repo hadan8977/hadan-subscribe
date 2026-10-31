@@ -55,4 +55,4 @@
 - MCP 只绑定 loopback；不要把它加到公网 Caddy 路由。
 - 所有写入都写 `audit(actor="mcp")`；`confirm` 是防止误操作的唯一门槛，调用前先用 `list_members/get_member` 确认对象。
 - `remove_member` 不删除用户/订阅行，避免破坏历史投递和审计；如需彻底删除，走数据库备份/人工流程。
-- MCP 进程不读取 SMTP 凭证（`Settings.smtp_required=false`），不具备发信能力；发信仍由 main worker 执行。
+- 管理 MCP 不提供发信工具，发信仍由 main worker 执行；但 `smtp_required=false` 只关闭启动校验，不隔离环境变量。若部署仍共享 EnvironmentFile，同进程可读取其中的 SMTP 配置；需要真正的凭据边界时应按角色拆分 EnvironmentFile。

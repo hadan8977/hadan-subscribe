@@ -1,8 +1,10 @@
-"""Agent-facing view of the source scan schedule.
+"""Agent-facing view of the configured source scan schedule.
 
-The scheduler is defined in America/New_York local time. All returned times
-use New York time with the correct DST offset. Agents should check only after
-the listed scans, not run a 24/7 interval loop.
+The scheduler is defined in America/New_York local time. Returned times use
+New York time with the correct DST offset. A scan is retained while any of its
+three checks is still due, even when the scan start itself is already in the
+past; this prevents a client that refreshes the schedule at 08:35 from losing
+the 08:40/08:50/09:00 checks of the 08:30 scan.
 """
 from __future__ import annotations
 
@@ -18,42 +20,59 @@ CHECKS_PER_SCAN = 3
 NY = ZoneInfo("America/New_York")
 
 
-def _checks(at: datetime) -> dict:
-    checks = [
-        at + timedelta(seconds=CHECK_DELAY_SECONDS + index * CHECK_INTERVAL_SECONDS)
-        for index in range(CHECKS_PER_SCAN)
-    ]
-    return {
-        "checks_new_york": [item.isoformat() for item in checks],
-        "check_window_start_new_york": checks[0].isoformat(),
-        "check_window_end_new_york": checks[-1].isoformat(),
-    }
+def _checks(kind: str, at: datetime, now: datetime) -> list[dict]:
+    checks = []
+    for index in range(CHECKS_PER_SCAN):
+        check_at = at + timedelta(
+            seconds=CHECK_DELAY_SECONDS + index * CHECK_INTERVAL_SECONDS
+        )
+        # A check exactly at generated_at is due, not lost. Clients must
+        # deduplicate by check_id if they fetch the schedule repeatedly.
+        if check_at < now:
+            continue
+        checks.append(
+            {
+                "check_id": f"{kind}:{at:%Y%m%dT%H%M}:{index + 1}",
+                "check_at_new_york": check_at.isoformat(),
+                "state": "due" if check_at <= now else "upcoming",
+            }
+        )
+    return checks
 
 
-def upcoming_scans(limit: int = 12) -> dict:
-    now = datetime.now(timezone.utc)
+def upcoming_scans(limit: int = 12, *, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     today = now.astimezone(NY).date()
     scans = []
-    for offset in range(0, 10):
+    # Start one day early so a late-night custom scan can contribute checks
+    # that fall after midnight. Ten days cover holidays and long weekends.
+    for offset in range(-1, 10):
         day = today + timedelta(days=offset)
         for hour, minute, kind in schedule_for_date(day):
             if kind not in CONTENT_KINDS:
                 continue
             at = datetime(day.year, day.month, day.day, hour, minute, tzinfo=NY)
-            if at <= now:
+            checks = _checks(kind, at, now)
+            if not checks:
                 continue
-            timing = _checks(at)
             scans.append(
                 {
                     "kind": kind,
                     "scan_at_new_york": at.isoformat(),
-                    "poll_after_new_york": timing["checks_new_york"][0],
-                    **timing,
+                    "poll_after_new_york": checks[0]["check_at_new_york"],
+                    "checks_new_york": [
+                        check["check_at_new_york"] for check in checks
+                    ],
+                    "checks": checks,
+                    "remaining_checks": len(checks),
+                    "check_window_start_new_york": checks[0]["check_at_new_york"],
+                    "check_window_end_new_york": checks[-1]["check_at_new_york"],
                 }
             )
-        if len(scans) >= limit:
-            break
-    scans = scans[:limit]
+    scans.sort(key=lambda item: item["poll_after_new_york"])
+    scans = scans[: max(1, min(int(limit), 50))]
     return {
         "generated_at_new_york": now.astimezone(NY).isoformat(),
         "timezone": "America/New_York",
@@ -65,17 +84,17 @@ def upcoming_scans(limit: int = 12) -> dict:
             "check_interval_within_window_seconds": CHECK_INTERVAL_SECONDS,
             "max_checks_per_scan": CHECKS_PER_SCAN,
             "do_not_poll_between_scans": True,
+            "deduplicate_by": "checks[].check_id",
+            "run_at_or_after_check": True,
         },
         "scans": scans,
         "note": (
-            "Run list_events only at the listed checks for each scan, at most three checks. "
-            "Each check is 10 minutes after the scan, then 10 and 20 minutes later. "
-            "On trading days there are no scheduled source scans between 09:30 and 16:00 New York time. "
-            "Do not run a 24/7 every-10-minute loop and do not poll between scans; "
-            "there is nothing new to fetch outside the scan windows. "
-            "If the scheduler can only repeat at a fixed interval, gate each run by "
-            "check_window_start_new_york and check_window_end_new_york and skip runs outside those windows. "
-            "If it cannot gate by time, use MCP Events or email instead of a continuous loop. "
-            "No pending events means no notification."
+            "Run list_events at a returned check time or shortly after it, at most once "
+            "per check_id. Re-fetching this schedule does not re-run checks; persist the "
+            "check_id you already executed. Webhook delivery and email are independent "
+            "and may arrive outside these scheduled checks. Do not run a 24/7 every-10-minute "
+            "loop, and do not poll between the returned checks. If the scheduler can only "
+            "repeat at a fixed interval, gate each run by the returned check times and skip "
+            "runs outside them. No pending events means no notification."
         ),
     }

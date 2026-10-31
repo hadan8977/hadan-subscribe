@@ -15,7 +15,8 @@
   let moreEvents = false, moreArchives = false, feedLoading = true, feedError = false;
   let feedGeneration = 0;
   let pairDetails = null, pairChecking = false, pairApproved = false, pairCheckedCode = "", pairBindingId = null, pairAutoTried = false;
-  let purchaseData = null, purchaseError = false, currentOrder = null, orderTimer = null, orderPolls = 0, agreedTermsVersion = null;
+  let purchaseData = null, purchaseError = false, currentOrder = null, orderTimer = null, orderPolls = 0, agreedTermsVersion = null, agreedQuoteId = null;
+  let orderPause = null, orderFailures = 0;
   const t = (key, vars = {}) => (bundle.strings[lang]?.[key] || key).replace(/\{(\w+)\}/g, (all, name) => vars[name] ?? all);
   function localMessage(value) {
     const text = String(value || "");
@@ -34,7 +35,7 @@
     try {
       const response = await fetch(path, {method, signal:controller.signal, credentials:"same-origin", headers:{"Content-Type":"application/json", "X-CSRF-Token":csrf, "Accept-Language":lang}, body:body === undefined ? undefined : JSON.stringify(body)});
       let result; try { result = await response.json(); } catch (_) { throw new Error(t("generic_error")); }
-      if (!response.ok) { const error = new Error(localMessage(result.error || t("generic_error"))); error.status = response.status; throw error; }
+      if (!response.ok) { const error = new Error(localMessage(result.error || t("generic_error"))); error.status = response.status; error.data = result?.data || null; throw error; }
       return result;
     } catch (error) { if (error.name === "AbortError" || error instanceof TypeError) throw new Error(t("network_error")); throw error; }
     finally { clearTimeout(deadline); }
@@ -67,9 +68,31 @@
     if (image && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(raw)) return raw;
     try { const url = new URL(raw, location.origin); if (url.username || url.password) return null; if (url.protocol !== "https:" && !(url.protocol === "http:" && url.origin === location.origin)) return null; return url.href; } catch (_) { return null; }
   }
+  let landingData = null, landingError = false;
   const subscription = () => account?.subscriptions.find((s) => s.product_id === QUANT);
   const activeAccess = (s) => !!(s && s.status === "active" && (!s.expires_at || Number(s.expires_at) > Date.now() / 1000));
   const activeAgent = () => account?.bindings.find((b) => b.state === "active");
+  function renderLandingPrice() {
+    const targets=document.querySelectorAll("[data-live-price]"); if(!targets.length)return;
+    let text=t(landingError?"purchase_price_unavailable":"loading");
+    if(!landingError&&landingData){
+      const plans=(landingData.plans||[]).filter(p=>p.id&&Number.isFinite(Number(p.amount_minor))&&money(p.amount_minor,p.currency)&&(Number(p.days)>0||Number(p.access_until)>Date.now()/1000));
+      if(!plans.length)text=t("purchase_price_unavailable");
+      else{
+        const plan=plans.reduce((a,b)=>Number(a.amount_minor)<=Number(b.amount_minor)?a:b);
+        const period=plan.access_until?t("plan_until",{date:date(plan.access_until)}):t("plan_days",{days:plan.days});
+        text=t(plans.length>1?"landing_price_from":"landing_price",{price:money(plan.amount_minor,plan.currency),period});
+      }
+    }
+    targets.forEach(target=>{target.textContent=text;});
+  }
+  async function loadLandingPrice() {
+    if(!document.querySelector("[data-live-price]"))return;
+    if(landingData||landingError){renderLandingPrice();return;}
+    try{landingData=await api("/api/purchase-options");landingError=false;}
+    catch(_){landingError=true;}
+    renderLandingPrice();
+  }
   const selectedAgent = () => pairBindingId ? account?.bindings.find(b=>b.id===pairBindingId && b.state==="active") : (entry.has("pair") && !pairApproved ? null : activeAgent());
   const stateName = (state) => bundle.strings[lang]?.["state_" + state] || state;
   function tab(name, updateURL = true) {
@@ -84,7 +107,12 @@
     lang = next === "en" ? "en" : "zh-CN"; document.documentElement.lang = lang;
     document.cookie = "quant_lang=" + lang + "; Path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
     if (writeURL) { const url = new URL(location.href); url.searchParams.set("lang", lang); history.replaceState(null, "", url.pathname + url.search + url.hash); }
-    document.querySelectorAll("[data-i18n]").forEach((el) => { if (el.dataset.i18n) el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      if (!el.dataset.i18n) return;
+      let text = t(el.dataset.i18n);
+      if (el.dataset.i18nName) text = text.replace(/\{name\}/g, el.dataset.i18nName);
+      el.textContent = text;
+    });
     document.querySelectorAll("[data-mail-sender-notice]").forEach((el) => { el.textContent = t("mail_sender_notice", {email: el.dataset.mailSender || ""}); });
     for (const attribute of ["placeholder", "aria-label", "content", "alt"]) document.querySelectorAll("[data-i18n-" + attribute + "]").forEach((el) => el.setAttribute(attribute, t(el.getAttribute("data-i18n-" + attribute))));
     document.querySelectorAll("[data-language]").forEach((a) => { a.toggleAttribute("aria-current", a.dataset.language === lang); if (a.dataset.language === lang) a.setAttribute("aria-current", "true"); const url = new URL(location.href); url.searchParams.set("lang", a.dataset.language); a.href = url.pathname + url.search + url.hash; });
@@ -94,7 +122,7 @@
     for (const selector of ["#login-status", "#redeem-status"]) { const el = $(selector); if (el?.dataset.statusKey) status(el, t(el.dataset.statusKey), el.classList.contains("error")); else if (el?.textContent) status(el, localMessage(el.textContent), el.classList.contains("error")); }
     if (account && $("#account")) renderAccount();
     if (adminData) renderAdmin();
-    renderPurchase(); renderOrder(); renderOnboarding();
+    renderPurchase(); renderOrder(); renderOnboarding(); renderLandingPrice();
     if ($("#agent-prompt-text")) $("#agent-prompt-text").value=t("agent_prompt", {url:location.origin});
     if ($("#guide-url")) $("#guide-url").value=t("agent_prompt", {url:location.origin});
   }
@@ -196,7 +224,10 @@
     const connections = account.bindings.filter((b) => b.state !== "revoked");
     $("#bindings-list").innerHTML = connections.length ? connections.map((b) => '<article class="entry"><div><h3>'+esc(b.name)+' <span class="badge">'+esc(stateName(b.state))+'</span></h3><p>'+esc(t(b.mode === "poll" ? "poll_mode" : "webhook_mode"))+' · '+esc(b.last_seen?t("last_connection",{date:date(b.last_seen,true)}):t("first_connection"))+'</p></div><button class="quiet danger" data-revoke="'+esc(b.id)+'">'+esc(t("revoke"))+'</button></article>').join("") : '<div class="empty"><strong>'+esc(t("agent_not_connected"))+'</strong>'+esc(t("agent_optional"))+'</div>';
     if ($(".redeem-panel")) $(".redeem-panel").hidden = active && !!sub && !sub.expires_at;
-    if ($("#purchase-section")) $("#purchase-section").hidden = active;
+    // Keep the purchase panel available for finite plans that can extend
+    // access. The form itself is gated by the live plan eligibility below;
+    // the order status card lives outside this panel so it survives payment.
+    if ($("#purchase-section")) $("#purchase-section").hidden = false;
     if (onboarding && !active) $("#purchase-section").open = true;
     if (entry.has("pair") && !pairApproved) {
       currentTab = active ? "connections" : "subscriptions";
@@ -209,10 +240,20 @@
   async function loadAccount({feed = true, waitForContent = true} = {}) {
     account = await api("/api/me"); csrf = account.csrf;
     if (!$("#account")) return;
+    const params = new URLSearchParams(location.search);
+    const orderId = params.get("order");
+    if (orderId && !params.has("view")) currentTab = "subscriptions";
     renderAccount();
     const tasks = [loadPurchaseOptions()]; if (feed) tasks.push(loadReports());
-    const orderId = entry.get("order");
-    if (!currentOrder && /^[a-f0-9]{32}$/.test(orderId||"")) tasks.push(api('/api/orders/'+orderId).then(order=>{currentOrder=order;renderOrder();orderPolls=0;checkOrder(true);}));
+    if (!currentOrder && /^[A-Za-z0-9_-]{6,64}$/.test(orderId||"")) tasks.push(api('/api/orders/'+orderId).then(order=>{
+      setCurrentOrder(order);
+      orderPolls=0;
+      checkOrder(true);
+    }).catch(error=>{
+      if(error.status===404){
+        const clean=new URL(location.href);clean.searchParams.delete("order");history.replaceState(null,"",clean.pathname+clean.search+clean.hash);
+      }
+    }));
     const code = $("#pair-code")?.value.trim().toUpperCase();
     if (code && code !== pairCheckedCode && !pairChecking) tasks.push(inspectPair());
     watchConnection();
@@ -297,7 +338,23 @@
     bind("#load-older-events","click",async()=>{if(eventBefore===null)return;const data=await api("/api/events?"+new URLSearchParams({limit:"100",newest:"true",before:String(eventBefore)}));const existing=new Set(displayedEvents.map(e=>e.id));displayedEvents.push(...data.events.filter(e=>e.product_id===QUANT&&!existing.has(e.id)));eventBefore=data.next_before;moreEvents=data.events.length===100;renderUpdates();});
     bind("#load-more-archive","click",async()=>{if(archiveBefore===null)return;const args=new URLSearchParams({limit:"50",before:String(archiveBefore)});if(archiveBeforeId)args.set("before_id",archiveBeforeId);const data=await api("/api/library?"+args);const existing=new Set(displayedArchives.map(e=>e.id));displayedArchives.push(...data.contents.filter(e=>e.product_id===QUANT&&!existing.has(e.id)));archiveBefore=data.next_before;archiveBeforeId=data.next_before_id;moreArchives=data.contents.length===50;renderUpdates();});
   }
-  async function loadPurchaseOptions() { if(!$("#purchase-options"))return;try{const updated=await api("/api/purchase-options");if(updated.terms_version!==purchaseData?.terms_version)resetTerms();purchaseData=updated;purchaseError=false;}catch(_){purchaseError=true;}renderPurchase(); }
+  async function loadPurchaseOptions() {
+    if(!$("#purchase-options"))return;
+    try {
+      const updated=await api("/api/purchase-options");
+      const oldQuotes=new Map((purchaseData?.plans||[]).map(p=>[p.id,p.quote_id]));
+      const changed=(updated.plans||[]).some(p=>oldQuotes.has(p.id)&&oldQuotes.get(p.id)!==p.quote_id);
+      if(updated.terms_version!==purchaseData?.terms_version||changed)resetTerms();
+      purchaseData=updated;purchaseError=false;
+    }catch(_){purchaseError=true;}
+    renderPurchase();
+  }
+  function purchaseEligible(plans) {
+    const sub=subscription();
+    if(!activeAccess(sub)) return true;
+    if(!sub?.expires_at) return false; // lifetime access cannot be extended by a duplicate purchase
+    return (plans||[]).some(p=>!p.access_until || Number(p.access_until)>Number(sub.expires_at));
+  }
   function renderPurchase() {
     const target=$("#purchase-options"); if(!target)return;
     if(!purchaseData){target.innerHTML='<p class="muted">'+esc(t(purchaseError?"purchase_unavailable":"loading"))+'</p>';return;}
@@ -306,49 +363,100 @@
     const enabled=methods.filter(m=>m.enabled&&["wechat","alipay"].includes(m.id));
     const xianyu=methods.find(m=>m.id==='xianyu'&&m.enabled), listing=safeURL(xianyu?.url);
     const oldPlan=$("#purchase-plan").value, oldMethod=$("input[name=payment-method]:checked")?.value;
-    target.innerHTML=(listing?'<p><a class="text-link" href="'+esc(listing)+'" target="_blank" rel="noopener noreferrer">'+esc(t("xianyu_purchase"))+' ↗</a></p>':'')+(plans.length?'':'<p class="muted">'+esc(t("no_plans"))+'</p>')+(plans.length&&!enabled.length?'<p class="muted">'+esc(t("purchase_unavailable"))+'</p>':'');
-    $("#purchase-form").hidden=!(plans.length&&enabled.length);
-    $("#purchase-plan").innerHTML=plans.map(p=>'<option value="'+esc(p.id)+'">Quant · '+esc(p.access_until?t("plan_until",{date:new Intl.DateTimeFormat(lang==='en'?'en-GB':'zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(p.access_until*1000-1))}):t("plan_days",{days:p.days}))+' · '+esc(money(p.amount_minor,p.currency))+'</option>').join("");
+    const eligible=purchaseEligible(plans);
+    target.innerHTML=(listing?'<p><a class="text-link" href="'+esc(listing)+'" target="_blank" rel="noopener noreferrer">'+esc(t("xianyu_purchase"))+' ↗</a></p>':'')+(plans.length?'':'<p class="muted">'+esc(t("no_plans"))+'</p>')+(plans.length&&!enabled.length?'<p class="muted">'+esc(t("purchase_unavailable"))+'</p>':'')+(plans.length&&!eligible?'<p class="muted">'+esc(t("access_already_active"))+'</p>':'');
+    $("#purchase-form").hidden=!(plans.length&&enabled.length&&eligible);
+    $("#purchase-plan").innerHTML=plans.map(p=>'<option value="'+esc(p.id)+'" data-quote="'+esc(p.quote_id||"")+'">Quant · '+esc(p.access_until?t("plan_until",{date:new Intl.DateTimeFormat(lang==='en'?'en-GB':'zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(p.access_until*1000-1))}):t("plan_days",{days:p.days}))+' · '+esc(money(p.amount_minor,p.currency))+'</option>').join("");
     if(plans.some(p=>p.id===oldPlan))$("#purchase-plan").value=oldPlan;
     $("#purchase-methods").innerHTML=enabled.map((m,i)=>'<label><input type="radio" name="payment-method" value="'+esc(m.id)+'" '+(m.id===oldMethod||(!oldMethod&&i===0)?'checked':'')+' required>'+esc(t("method_"+m.id))+'</label>').join("");
   }
+  function orderTerminal(order) {
+    return !order || order.paid || ["paid","confirmed","complete","completed","expired","failed","cancelled","canceled","review","closed"].includes(order.status);
+  }
+  function setCurrentOrder(order, {updateURL = true} = {}) {
+    currentOrder = order;
+    orderPause = null; orderFailures = 0;
+    if (updateURL && order?.id) {
+      const url = new URL(location.href);
+      url.searchParams.set("order", order.id);
+      if (!url.searchParams.has("view")) url.searchParams.set("view", "subscriptions");
+      history.replaceState(null, "", url.pathname + url.search + url.hash);
+    }
+    renderOrder();
+  }
+  function stopOrderCheck() { clearTimeout(orderTimer); orderTimer = null; }
+  function scheduleOrderCheck(delay = 6000) {
+    stopOrderCheck();
+    orderTimer = setTimeout(() => {
+      orderTimer = null;
+      if (document.hidden) { scheduleOrderCheck(6000); return; }
+      checkOrder(true);
+    }, delay);
+  }
   function renderOrder() {
-    const target=$("#purchase-order");if(!target||!currentOrder)return;target.hidden=false;
+    const target=$("#purchase-order");if(!target)return;
+    if(!currentOrder){target.hidden=true;return;}
+    target.hidden=false;
     const paid=!!currentOrder.paid||["paid","confirmed","complete","completed"].includes(currentOrder.status);
     const failed=["failed","cancelled","canceled"].includes(currentOrder.status), expired=currentOrder.status==='expired',closed=currentOrder.status==='closed';
     const held=["verifying","review"].includes(currentOrder.status);
     const blocked=held||["creating","pending"].includes(currentOrder.status);
     if($("#purchase-submit")){ $("#purchase-submit").dataset.locked=String(blocked); $("#purchase-submit").disabled=blocked; }
-    const heading=closed?"order_closed":currentOrder.status==='review'?"order_review":currentOrder.status==='verifying'?"order_verifying":paid?"order_paid":expired?"order_expired":failed?"order_failed":"order_pending";
+    const heading=orderPause==="session"?"order_session_expired":orderPause==="paused"?"order_check_paused":closed?"order_closed":currentOrder.status==='review'?"order_review":currentOrder.status==='verifying'?"order_verifying":paid?"order_paid":expired?"order_expired":failed?"order_failed":"order_pending";
     const pay=safeURL(currentOrder.pay_url), qr=safeURL(currentOrder.qr_url,{image:true});
     const embeddable=qr&&(qr.startsWith('data:')||new URL(qr).origin===location.origin);
     const amount=money(currentOrder.amount_minor,currentOrder.currency);
     const scan=currentOrder.method==='alipay'?t("scan_alipay"):t("scan_wechat");
     const showQr=!paid&&!expired&&!failed&&!held&&!closed&&embeddable;
-    const showLink=!paid&&!expired&&!failed&&!held&&!closed&&!embeddable&&!!(pay||qr);
+    const fallback=pay||(qr&&!embeddable?qr:null);
+    const showLink=!paid&&!expired&&!failed&&!held&&!closed&&!!(pay||(qr&&!embeddable));
+    const showCheck=!paid&&!failed&&!closed;
     target.innerHTML='<div class="order-card">'
       +'<div class="order-head"><div><p class="eyebrow">'+esc(t("order_heading"))+'</p><h3>'+esc(t(heading))+'</h3></div>'+(paid?'<span class="order-badge" aria-hidden="true">✓</span>':'')+'</div>'
       +(amount?'<p class="order-amount">'+esc(amount)+'</p>':'')
+      +(orderPause==="session"?'<p class="error">'+esc(t("order_session_expired"))+'</p>':'')
+      +(orderPause==="paused"?'<p class="muted">'+esc(t("order_check_paused"))+'</p>':'')
       +(showQr?'<p class="order-hint">'+esc(scan)+'</p><div class="qr-wrap"><img class="order-qr" src="'+esc(qr)+'" alt="'+esc(t("qr_alt"))+'"></div>':'')
+      +(showQr?'<div class="qr-fallback" hidden><p class="muted">'+esc(t("qr_unavailable"))+'</p>'+(fallback?'<a class="button" href="'+esc(fallback)+'" target="_blank" rel="noopener noreferrer">'+esc(t("open_payment"))+' ↗</a>':'')+'</div>':'')
       +(currentOrder.expires_at&&!paid&&!held&&!closed?'<p class="order-expiry">'+esc(t("order_expiry",{date:date(currentOrder.expires_at,true)}))+'</p>':'')
-      +(showLink?'<div class="order-actions"><a class="button" href="'+esc(pay||qr)+'" target="_blank" rel="noopener noreferrer">'+esc(t("open_payment"))+' ↗</a></div>':'')
-      +(!paid&&!failed&&!closed?'<div class="order-actions"><button id="check-payment" class="button" type="button">'+esc(t("check_payment"))+'</button></div>':'')
+      +(showLink?'<div class="order-actions"><a class="button" href="'+esc(pay||qr)+'" target="_blank" rel="noopener noreferrer">'+esc(t("open_payment"))+' ↗</a><p class="muted">'+esc(t("open_payment_note"))+'</p></div>':'')
+      +(showCheck?'<div class="order-actions"><button id="check-payment" class="button" type="button">'+esc(t("check_payment"))+'</button></div>':'')
       +'</div>';
+    if(showQr){
+      const image=target.querySelector(".order-qr");
+      image?.addEventListener("error",()=>{image.hidden=true;const fallbackBox=target.querySelector(".qr-fallback");if(fallbackBox)fallbackBox.hidden=false;});
+    }
     if(!target.dataset.shown){target.dataset.shown="1";target.scrollIntoView({behavior:"smooth",block:"center"});}
     bind("#check-payment","click",()=>checkOrder(false));
   }
   async function checkOrder(automatic=false) {
     if(!currentOrder?.id)return;
+    stopOrderCheck();
     try {
       if(!automatic&&!currentOrder.paid&&!["paid","closed"].includes(currentOrder.status)){
-        try{await api("/api/orders/"+encodeURIComponent(currentOrder.id)+"/reconcile","POST",{});}catch(error){if(error.status!==403&&error.status!==503)throw error;}
+        // Reconciliation is best-effort; only an invalid session blocks the
+        // subsequent authoritative status read.
+        try{await api("/api/orders/"+encodeURIComponent(currentOrder.id)+"/reconcile","POST",{});}catch(error){if(error.status===401)throw error;}
       }
-      currentOrder=await api("/api/orders/"+encodeURIComponent(currentOrder.id));renderOrder();
-      if(currentOrder.paid||["paid","confirmed","complete","completed"].includes(currentOrder.status)){clearTimeout(orderTimer);await loadAccount();toast(t("order_paid"));return;}
-      if(automatic&&!['expired','failed','cancelled','canceled','review','closed'].includes(currentOrder.status)&&orderPolls++<20)orderTimer=setTimeout(()=>{if(document.hidden){orderTimer=setTimeout(()=>checkOrder(true),6000);}else checkOrder(true);},6000);
-    } catch(error){if(!automatic)throw error;if(error.status===404&&orderPolls++<20)orderTimer=setTimeout(()=>checkOrder(true),6000);}
+      currentOrder=await api("/api/orders/"+encodeURIComponent(currentOrder.id));
+      orderPause=null;orderFailures=0;renderOrder();
+      if(orderTerminal(currentOrder)){
+        if(currentOrder.paid||["paid","confirmed","complete","completed"].includes(currentOrder.status)){await loadAccount();toast(t("order_paid"));}
+        return;
+      }
+      if(automatic){
+        if(orderPolls++<20)scheduleOrderCheck(6000);
+        else {orderPause="paused";renderOrder();}
+      }
+    } catch(error){
+      if(!automatic)throw error;
+      if(error.status===401){orderPause="session";renderOrder();return;}
+      orderFailures++;
+      if(error.status===404&&orderPolls++<20){scheduleOrderCheck(6000);return;}
+      if(orderFailures<5&&orderPolls++<20){scheduleOrderCheck(Math.min(30000,3000*Math.pow(2,orderFailures)));return;}
+      orderPause="paused";renderOrder();
+    }
   }
-
   function renderAdmin() {
     if(!adminData)return;const data=adminData;
     $("#readiness").innerHTML=[[t("mail_system"),data.readiness.mail==='file'?t("local_test"):'SMTP'],[t("maintenance_agent"),t(data.readiness.ai?'enabled':'disabled')],[t("payments"),t(data.readiness.payments?'configured':'not_configured')],[t("environment"),t(data.readiness.production?'production':'local_test')]].map(([label,value])=>'<div class="stat"><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>').join("");
@@ -468,19 +576,45 @@
   });
   bind("#binding-mode","change",()=>{$("#endpoint-field").hidden=$("#binding-mode").value!=='webhook';$("#endpoint").required=$("#binding-mode").value==='webhook';});
   bind("#binding-form","submit",async()=>{const result=await api('/api/bindings','POST',{name:$("#binding-name").value,mode:$("#binding-mode").value,endpoint:$("#endpoint").value||null});$("#binding-secret").hidden=false;$("#secret-value").value='Bearer token: '+result.token+(result.webhook_secret?'\nWebhook signing secret: '+result.webhook_secret:'');await loadAccount({feed:false});toast(t("connection_created"));});
-  bind("#billing-portal","click",async()=>{const result=await api('/api/billing/portal','POST',{});const url=safeURL(result.url);if(!url)throw new Error(t("invalid_payment_url"));location.assign(url);});
-  bind("#stop-subscription","click",async()=>{const sub=subscription();if(!sub||!confirm(t("cancel_confirm")))return;await api('/api/subscriptions/'+encodeURIComponent(sub.id)+'/cancel','POST',{});await loadAccount();toast(t("cancel_done"));});
   bind("#redeem-form","submit",async()=>{const code=$("#redeem-code").value.trim();try{await api('/api/redeem','POST',{code});$("#redeem-code").value='';$("#redeem-status").dataset.statusKey='redeemed';status($("#redeem-status"),t("redeemed"));await loadAccount();}catch(error){$("#redeem-status").dataset.statusKey='';status($("#redeem-status"),error.message,true);throw error;}});
-  function resetTerms() { agreedTermsVersion = null; if($("#accept-terms")) $("#accept-terms").checked = false; }
-  bind("#accept-terms", "change", () => { agreedTermsVersion = $("#accept-terms").checked ? purchaseData?.terms_version : null; });
+  function resetTerms() { agreedTermsVersion = null; agreedQuoteId = null; if($("#accept-terms")) $("#accept-terms").checked = false; }
+  bind("#accept-terms", "change", () => {
+    const checked=!!$("#accept-terms").checked;
+    agreedTermsVersion=checked?purchaseData?.terms_version:null;
+    agreedQuoteId=checked?($("#purchase-plan").selectedOptions[0]?.dataset.quote||null):null;
+  });
   bind("#purchase-plan", "change", resetTerms);
   $("#purchase-methods")?.addEventListener("change", resetTerms);
   bind("#purchase-form","submit",async()=>{
     const method=$("input[name=payment-method]:checked")?.value;if(!method)return;
+    const planOption=$("#purchase-plan").selectedOptions[0];
+    const quote=planOption?.dataset.quote||agreedQuoteId||null;
     if(!$("#accept-terms").checked||!agreedTermsVersion||agreedTermsVersion!==purchaseData?.terms_version)throw new Error(t("terms_required"));
-    const request={plan_id:$("#purchase-plan").value,method,accept_terms:true,terms_version:agreedTermsVersion};
-    currentOrder=await api('/api/purchase','POST',request);
-    resetTerms();orderPolls=0;clearTimeout(orderTimer);renderOrder();orderTimer=setTimeout(()=>checkOrder(true),6000);
+    if(agreedQuoteId&&quote&&agreedQuoteId!==quote)throw new Error(t("quote_changed"));
+    const request={plan_id:$("#purchase-plan").value,method,accept_terms:true,terms_version:agreedTermsVersion,...(quote?{quote_id:quote}:{})};
+    try {
+      const order=await api('/api/purchase','POST',request);
+      resetTerms();orderPolls=0;setCurrentOrder(order);scheduleOrderCheck(6000);
+    } catch(error) {
+      if(error.status===409&&error.data?.order_id){
+        const existing=await api('/api/orders/'+encodeURIComponent(error.data.order_id));
+        setCurrentOrder(existing);toast(t("order_recovered"));return;
+      }
+      if(error.status===409&&(error.data?.quote_changed||error.data?.code==="quote_changed")){
+        await loadPurchaseOptions();resetTerms();throw new Error(t("quote_changed"));
+      }
+      if(!error.status){
+        // The POST may have reached the server even when the response was
+        // lost. Recover the owner's existing pending order instead of
+        // encouraging a second charge.
+        try{
+          const recent=await api('/api/orders');
+          const pending=(recent.orders||[]).find(o=>["creating","pending","verifying","review"].includes(o.status));
+          if(pending){setCurrentOrder(pending);toast(t("order_recovered"));return;}
+        }catch(_){}
+      }
+      throw error;
+    }
   });
   bind("#refresh-reports","click",loadReports);
   bind("#refresh-admin","click",loadAdmin);
@@ -489,6 +623,9 @@
   if($("#guide-url"))$("#guide-url").value=t("agent_prompt",{url:location.origin});
   if($("#workspace")){const args=new URLSearchParams(location.search);currentTab=args.has('pair')?'connections':args.get('view')||(args.has('product')?'subscriptions':'updates');if(args.has('pair'))$("#pair-code").value=args.get('pair');loadAccount().then(()=>{if(!activeAccess(subscription())&&!args.has('view')&&!args.has('pair')){currentTab='subscriptions';renderAccount();}if(onboarding&&nextReport())returnToReport();}).catch(error=>{if(error.status!==401)toast(error.message,true);});}
   if($("#admin"))loadAdmin().catch(error=>toast(error.message,true));
-  window.addEventListener('pagehide',()=>{clearTimeout(orderTimer);clearTimeout(connectionTimer);if($("#secret-value"))$("#secret-value").value='';if($("#redeem-code"))$("#redeem-code").value='';});
+  window.addEventListener('pagehide',()=>{stopOrderCheck();clearTimeout(connectionTimer);if($("#secret-value"))$("#secret-value").value='';if($("#redeem-code"))$("#redeem-code").value='';});
+  window.addEventListener('pageshow',()=>{if(currentOrder&&!orderTerminal(currentOrder)&&!orderPause&&document.visibilityState==='visible')checkOrder(true);});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&currentOrder&&!orderTerminal(currentOrder)&&!orderPause)checkOrder(true);});
   applyLanguage(lang,false);
+  loadLandingPrice();
 })();

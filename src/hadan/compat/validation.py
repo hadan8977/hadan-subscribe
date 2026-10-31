@@ -29,7 +29,19 @@ def validate_member_picks_data(data: Dict[str, Any]) -> None:
         )
     weekly_date = str(weekly.get("pick_date") or "")
     weekly_kind = str(weekly.get("kind") or "weekly_picks")
-    weekly_symbols = [str(row.get("symbol") or "") for row in weekly_rows]
+    weekly_symbols = [str(row.get("symbol") or "").strip().upper() for row in weekly_rows]
+    if any(not symbol for symbol in weekly_symbols):
+        raise RuntimeError(
+            "logged-in weekly picks validation failed: blank symbol in loaded rows"
+        )
+    duplicate_weekly = sorted(
+        {symbol for symbol in weekly_symbols if weekly_symbols.count(symbol) > 1}
+    )
+    if duplicate_weekly:
+        raise RuntimeError(
+            "logged-in weekly picks validation failed: duplicate symbols: "
+            + ", ".join(duplicate_weekly[:5])
+        )
     generic_detail_rows = [
         row
         for row in weekly_rows
@@ -46,9 +58,9 @@ def validate_member_picks_data(data: Dict[str, Any]) -> None:
         raise RuntimeError(
             "rejected unauthenticated/demo Weekly Picks signature: 05/15/26"
         )
-    if len(weekly_rows) < 8:
+    if len(set(weekly_symbols)) < 8:
         raise RuntimeError(
-            f"logged-in weekly picks validation failed: expected near-complete Weekly Top 10, captured {len(weekly_rows)} rows"
+            f"logged-in weekly picks validation failed: expected near-complete Weekly Top 10, captured {len(set(weekly_symbols))} unique rows"
         )
     if not (monthly.get("rows") or []):
         raise RuntimeError(
@@ -56,6 +68,19 @@ def validate_member_picks_data(data: Dict[str, Any]) -> None:
         )
 
     monthly_rows = monthly.get("rows") or []
+    monthly_symbols = [str(row.get("symbol") or "").strip().upper() for row in monthly_rows]
+    if any(not symbol for symbol in monthly_symbols):
+        raise RuntimeError(
+            "logged-in monthly picks validation failed: blank symbol in loaded rows"
+        )
+    duplicate_monthly = sorted(
+        {symbol for symbol in monthly_symbols if monthly_symbols.count(symbol) > 1}
+    )
+    if duplicate_monthly:
+        raise RuntimeError(
+            "logged-in monthly picks validation failed: duplicate symbols: "
+            + ", ".join(duplicate_monthly[:5])
+        )
     # Quant GT can omit buy/entry price for an otherwise complete monthly row.
     # Keep hard gates on the independent detail fields that prove real loading.
     required_monthly_fields = [

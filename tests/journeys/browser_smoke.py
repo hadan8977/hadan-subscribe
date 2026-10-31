@@ -12,9 +12,11 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -87,7 +89,17 @@ def run():
     from hadan.commerce import Commerce
 
     OUT.mkdir(parents=True, exist_ok=True)
-    report = {"checks": [], "layouts": [], "page_errors": [], "findings": [], "screenshots": []}
+    report = {
+        "checks": [],
+        "layouts": [],
+        "page_errors": [],
+        "findings": [],
+        "screenshots": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+    }
     with tempfile.TemporaryDirectory(prefix="quant-browser-review-") as temp:
         # This host can allocate low ephemeral ports (for example IRC's 6669),
         # which Chromium correctly refuses. Keep that browser protection enabled.
@@ -284,7 +296,6 @@ def run():
                     login(reader, "reader@example.test", test_switch=True)
                     tab(reader, "subscriptions")
                     expect(reader.locator('[data-subscribe="quantgt"]')).to_have_count(0)
-                    expect(reader.locator("#billing-portal")).to_be_hidden()
                     reader.locator("#purchase-section summary").click()
                     expect(reader.locator("#purchase-options")).to_contain_text("没有可购买")
                     expect(reader.locator("#purchase-form")).to_be_hidden()
@@ -314,21 +325,17 @@ def run():
                     expect(reader.locator("#account")).to_be_visible(timeout=2000)
                     tab(reader, "connections")
                     with reader.expect_response(lambda response: "/api/subscriptions/" in response.url and response.request.method == "PATCH", timeout=2000):
-                        reader.locator('[data-pref="email_enabled"]').uncheck()
+                        reader.locator('[data-delivery-pref="email_enabled"]').click()
                     assert not sub()["email_enabled"]
                     for route in held:
                         try: route.continue_()
                         except PlaywrightError as exc:
                             if "already handled" not in str(exc): raise
                     reader.unroute("**/api/events?*")
-                    reader.locator('[data-pref="email_enabled"]').check()
-                    expect(reader.locator('[data-pref="email_enabled"]')).to_be_enabled()
-                    reader.locator("#subscriptions-list summary").click()
-                    reader.locator("#email-policy").select_option("always")
-                    expect(reader.locator("#email-policy")).to_be_enabled()
-                    reader.locator("#email-format").select_option("full")
-                    expect(reader.locator("#email-format")).to_be_enabled()
-                    assert sub()["email_enabled"] == 1 and sub()["email_format"] == "full"
+                    with reader.expect_response(lambda response: "/api/subscriptions/" in response.url and response.request.method == "PATCH", timeout=2000):
+                        reader.locator('[data-delivery-pref="email_enabled"]').click()
+                    expect(reader.locator('[data-delivery-pref="email_enabled"]')).to_have_attribute("aria-pressed","true")
+                    assert sub()["email_enabled"] == 1
                     expect(reader.locator("#bindings-list")).to_contain_text("未连接")
                     layout(reader, "desktop-delivery-cn"); screenshot(reader, "desktop-delivery-cn")
                     check("Delivery preferences remain interactive while feed loading is delayed and save independent email options")
@@ -374,6 +381,9 @@ def run():
                     layout(admin, "mobile-admin-cn"); screenshot(admin, "mobile-admin-cn")
                     admin.set_viewport_size({"width":1365,"height":900})
                     check("Bilingual administrator form publishes original-language body and two files, with one Quant product")
+                    # The simplified UI no longer exposes email-format controls;
+                    # exercise the still-supported full-content email directly.
+                    service.preferences(sub()["user_id"], sub()["id"], {"email_format": "full"})
                     drain()
                     mails = [BytesParser(policy=policy.default).parsebytes(p.read_bytes()) for p in (cfg.data_dir/"mail").glob("*.eml")]
                     content_mail = [m for m in mails if m["To"] == "reader@example.test" and m["Subject"] == "本周 Portfolio 更新"]
@@ -467,6 +477,8 @@ def run():
                     assert reader.request.post(base+f"/api/events/{notice_id}/ack").status == 401
                     check("Account notices remain private to their owner; human sessions cannot forge Agent processing")
 
+
+
                     unsubscribe = base+"/unsubscribe/"+action_token(cfg.secret,sub()["id"])
                     phone.goto(unsubscribe+"?lang=en")
                     expect(phone.locator("h1")).to_have_text("Turn off Quant email")
@@ -482,19 +494,25 @@ def run():
 
                     mobile_reader.goto(base+"/app?view=subscriptions&lang=en")
                     expect(mobile_reader.locator("#view-subscriptions")).to_be_visible()
+                    tab(mobile_reader, "connections")
                     mobile_reader.once("dialog",lambda dialog:dialog.accept())
-                    mobile_reader.locator("#stop-subscription").click()
-                    expect(mobile_reader.locator("#toast")).to_contain_text("Delivery stopped")
+                    if sub()["email_enabled"]:
+                        with mobile_reader.expect_response(lambda response: "/api/subscriptions/" in response.url and response.request.method == "PATCH", timeout=2000):
+                            mobile_reader.locator('[data-delivery-pref="email_enabled"]').click()
+                    if sub()["agent_enabled"]:
+                        with mobile_reader.expect_response(lambda response: "/api/subscriptions/" in response.url and response.request.method == "PATCH", timeout=2000):
+                            mobile_reader.locator('[data-delivery-pref="agent_enabled"]').click()
+                    expect(mobile_reader.locator("#toast")).to_contain_text("saved")
                     assert not sub()["email_enabled"] and not sub()["agent_enabled"]
                     assert mobile_reader.request.get(base+"/read/"+item["id"]).status == 200
                     redeem(mobile_reader,codes[2])
                     assert sub()["expires_at"] > first_expiry and not sub()["email_enabled"] and not sub()["agent_enabled"]
                     layout(mobile_reader,"mobile-renewed-en"); screenshot(mobile_reader,"mobile-renewed-en")
                     tab(mobile_reader,"connections")
-                    expect(mobile_reader.locator('[data-pref="email_enabled"]')).not_to_be_checked()
-                    expect(mobile_reader.locator('[data-pref="agent_enabled"]')).not_to_be_checked()
+                    expect(mobile_reader.locator('[data-delivery-pref="email_enabled"]')).to_have_attribute("aria-pressed","false")
+                    expect(mobile_reader.locator('[data-delivery-pref="agent_enabled"]')).to_have_attribute("aria-pressed","false")
                     layout(mobile_reader,"mobile-delivery-en"); screenshot(mobile_reader,"mobile-delivery-en")
-                    check("Full cancellation stops both channels while paid reading remains; renewal extends access without resetting opt-outs")
+                    check("Both delivery channels can be turned off while paid reading remains; access extension does not reset opt-outs")
 
                     long_file = service.publish("quantgt","long-filename","长文件名阅读测试","附件名称应在小屏完整显示。",files=[{"name":"weekly-"+"Portfolio_"*13+".csv","data":b"a,b\n1,2\n"}])
                     mobile_reader.goto(base+"/read/"+long_file["id"])
@@ -582,10 +600,10 @@ def run():
                     # Test the visual checkout contract using declared synthetic responses only.
                     # No actual price/provider is configured and no external payment is made.
                     reader.route("**/api/purchase-options",lambda route:route.fulfill(json={
-                        "plans":[{"id":"test-only","title":"Synthetic test fixture","days":30,"amount_minor":100,"currency":"CNY"}],
+                        "plans":[{"id":"test-only","title":"Synthetic test fixture","days":30,"amount_minor":100,"currency":"CNY","quote_id":"quote-test-only"}],
                         "terms_version":"2026-10-28", "methods":[{"id":"code","enabled":True},{"id":"xianyu","enabled":True,"url":"https://www.goofish.com/item?id=test-only"},{"id":"wechat","enabled":True},{"id":"alipay","enabled":False},{"id":"usdt","enabled":False}],
                     }))
-                    order={"id":"test-order","status":"pending","paid":False,"amount_minor":100,"currency":"CNY","expires_at":time.time()+1800,"qr_url":"/static/favicon.svg"}
+                    order={"id":"test-order","status":"pending","paid":False,"amount_minor":100,"currency":"CNY","expires_at":time.time()+1800,"qr_url":"/static/favicon.svg","pay_url":"https://example.test/pay"}
                     purchase_calls=[]
                     def create_order(route):
                         purchase_calls.append(route.request.post_data_json); route.fulfill(json=order)
@@ -602,7 +620,12 @@ def run():
                     reader.locator("#purchase-submit").click()
                     expect(reader.locator("#purchase-order")).to_contain_text("Awaiting payment confirmation")
                     expect(reader.locator("#purchase-order img")).to_be_visible()
-                    assert purchase_calls == [{"plan_id":"test-only","method":"wechat","accept_terms":True,"terms_version":"2026-10-28"}]
+                    expect(reader.locator('#purchase-order .order-actions a[href="https://example.test/pay"]')).to_be_visible()
+                    assert purchase_calls == [{"plan_id":"test-only","method":"wechat","accept_terms":True,"terms_version":"2026-10-28","quote_id":"quote-test-only"}]
+                    assert "order=test-order" in reader.url
+                    reader.reload(wait_until="domcontentloaded")
+                    expect(reader.locator("#purchase-order")).to_contain_text("being verified")
+                    expect(reader.locator("#purchase-order img")).to_have_count(0)
                     expect(reader.locator("#purchase-submit")).to_be_disabled()
                     reader.locator("#check-payment").click()
                     expect(reader.locator("#purchase-order")).to_contain_text("do not pay again")

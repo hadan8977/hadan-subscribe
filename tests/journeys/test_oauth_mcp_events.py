@@ -587,7 +587,7 @@ def test_mcp_accepts_chatgpt_origin_and_callback_query(journey, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["result"]["_meta"]["mcp/www_authenticate"]
-    monkeypatch.setattr("hadan.mcp_events._public_host", lambda host, port: None)
+    monkeypatch.setattr("hadan.mcp_events._resolve_public", lambda host, port, timeout=None: ["1.1.1.1"])
     assert validate_callback_url("https://chatgpt.com/callback?subscription=abc") == ("chatgpt.com", 443)
 
 

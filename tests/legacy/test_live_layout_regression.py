@@ -191,3 +191,40 @@ def test_watchlist_javascript_identifies_real_word_boundaries_offline():
     """
     completed = subprocess.run([node, "-e", program, json.dumps(cases)], check=True, text=True, capture_output=True, timeout=10)
     assert json.loads(completed.stdout) == [case["expected"] for case in cases]
+
+
+class _ScreenshotPage:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def evaluate(self, _script, _mode):
+        header = ["Company", "Symbol", "Price", "Sector", "GT Score"]
+        return {"matrix": [header, *self.rows], "cards": []}
+
+
+def _screenshot_row(symbol="MRNA", score="4.50/5", company="Fixture Example Company"):
+    return [company, symbol, "$100.00", "Fixture Sector", score]
+
+
+def test_screenshot_stable_fields_must_match_the_captured_edition():
+    expected = [
+        {
+            "symbol": "MRNA",
+            "company": "Fixture Example Company",
+            "sector": "Fixture Sector",
+            "gt_score": "4.50/5",
+        }
+    ]
+    browser._assert_screenshot_symbols_match(
+        _ScreenshotPage([_screenshot_row()]), "weekly", expected
+    )
+    with pytest.raises(RuntimeError, match="changed gt_score"):
+        browser._assert_screenshot_symbols_match(
+            _ScreenshotPage([_screenshot_row(score="4.99/5")]), "weekly", expected
+        )
+    with pytest.raises(RuntimeError, match="changed company"):
+        browser._assert_screenshot_symbols_match(
+            _ScreenshotPage([_screenshot_row(company="Revised Edition Inc.")]),
+            "weekly",
+            expected,
+        )

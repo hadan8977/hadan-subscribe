@@ -41,6 +41,9 @@ class Settings:
         default_factory=lambda: os.getenv("MAIL_SENDER", "").strip()
     )
     mail_reply_to: str = field(default_factory=lambda: os.getenv("MAIL_REPLY_TO", ""))
+    support_contact: str = field(
+        default_factory=lambda: os.getenv("SUPPORT_CONTACT", "").strip()
+    )
     smtp_host: str = field(default_factory=lambda: os.getenv("SMTP_HOST", ""))
     smtp_port: int = field(default_factory=lambda: int(os.getenv("SMTP_PORT", "587")))
     smtp_user: str = field(default_factory=lambda: os.getenv("SMTP_USERNAME", ""))
@@ -97,6 +100,8 @@ class Settings:
     def __post_init__(self):
         if not self.mail_sender:
             self.mail_sender = parseaddr(self.mail_from)[1]
+        if not self.support_contact:
+            self.support_contact = self.mail_sender
 
     @property
     def db_path(self) -> Path:
@@ -140,6 +145,14 @@ class Settings:
             errors.append("HADAN_SECRET must contain at least 48 random characters")
         if not self.admin_emails:
             errors.append("HADAN_ADMIN_EMAILS is required")
+        contact = parseaddr(self.support_contact)[1]
+        if (
+            not contact
+            or contact != self.support_contact
+            or "example." in contact.lower()
+            or "@" not in contact
+        ):
+            errors.append("SUPPORT_CONTACT must be a real email address")
         if require_smtp:
             if (
                 self.mail_backend != "smtp"

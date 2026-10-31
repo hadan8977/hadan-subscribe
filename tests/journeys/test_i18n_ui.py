@@ -174,3 +174,43 @@ def test_delivery_test_content_is_hidden_from_human_history(journey):
     assert cid in {item["content_id"] for item in agent_events}
 
 
+
+
+def test_terms_page_uses_configured_support_contact(journey):
+    journey.settings.support_contact = "support@quant.example"
+    # The Jinja global is captured at app construction; create a fresh app.
+    from hadan.web import create_app
+    from fastapi.testclient import TestClient
+
+    app = create_app(journey.settings)
+    client = TestClient(app, base_url=journey.settings.base_url)
+    page = client.get("/terms?lang=en")
+    assert page.status_code == 200
+    assert "support@quant.example" in page.text
+    assert "mailto:support@quant.example" in page.text
+
+
+def test_homepage_and_login_expose_live_price_targets(journey, monkeypatch):
+    client = journey.client()
+    home = client.get("/?lang=en")
+    assert home.status_code == 200
+    assert 'data-live-price' in home.text
+    app_page = client.get("/app?lang=en")
+    assert app_page.status_code == 200
+    assert 'id="login-price"' in app_page.text
+    assert 'data-live-price' in app_page.text
+
+    monkeypatch.setattr(
+        "hadan.commerce.Commerce.provider_ready",
+        lambda self, receive_existing=False: True,
+    )
+    journey.settings.xiaodou_enabled = True
+    journey.settings.xiaodou_methods = ("wechat",)
+    journey.settings.payment_plans = [
+        {"id": "one", "title": "Quant", "days": 30, "amount_minor": 1500, "currency": "CNY"}
+    ]
+    options = client.get("/api/purchase-options").json()
+    plan = options["plans"][0]
+    assert plan["quote_id"]
+    assert plan["amount_minor"] == 1500 and plan["currency"] == "CNY"
+    assert options["support_contact"]

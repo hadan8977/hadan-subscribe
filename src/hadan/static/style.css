@@ -55,3 +55,5 @@
 .site-footer{justify-content:flex-end}
 
 .delivery-actions{display:flex;gap:12px;flex-wrap:wrap}.delivery-toggle{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:12px 20px;font-size:14px;font-weight:500}.delivery-toggle[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}.delivery-toggle[aria-pressed=false]{opacity:.72}.delivery-toggle:disabled{opacity:.45}
+.qr-fallback{margin-top:16px}.qr-fallback .button{margin-top:10px}
+.live-price{font-size:12px!important;line-height:1.7;color:var(--muted);margin:0 0 8px}

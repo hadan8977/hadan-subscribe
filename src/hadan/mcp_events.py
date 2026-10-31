@@ -8,6 +8,7 @@ signed JSON event per report publication or withdrawal.
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import hashlib
 import hmac
 import http.client
@@ -33,7 +34,11 @@ MIN_TTL_MS = 3600 * 1000
 MAX_TTL_MS = 90 * 86400 * 1000
 MAX_BODY = 256 * 1024
 CALLBACK_TIMEOUT = 12.0
+CALLBACK_TOTAL_TIMEOUT = 20.0
+DELIVERY_LEASE_SECONDS = 300
+MAX_CALLBACK_ADDRESSES = 4
 MAX_RESPONSE_BYTES = 64 * 1024
+_DNS_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp-dns")
 
 
 class CallbackError(Exception):
@@ -72,9 +77,17 @@ def _signature(key: bytes, webhook_id: str, timestamp: str, body: bytes) -> str:
     ).decode()
 
 
-def _resolve_public(host: str, port: int) -> list[str]:
+def _resolve_public(host: str, port: int, timeout: float | None = None) -> list[str]:
     try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        if timeout is None:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        else:
+            future = _DNS_POOL.submit(
+                socket.getaddrinfo, host, port, type=socket.SOCK_STREAM
+            )
+            infos = future.result(timeout=max(0.1, timeout))
+    except concurrent.futures.TimeoutError:
+        raise CallbackError("timeout", "callback host resolution timed out") from None
     except OSError:
         raise CallbackError("dns_failed", "callback host could not be resolved") from None
     if not infos:
@@ -97,7 +110,7 @@ def _public_host(host: str, port: int) -> None:
     _resolve_public(host, port)
 
 
-def _validate_callback(url: str) -> tuple[str, int, list[str]]:
+def _validate_callback(url: str, *, deadline: float | None = None) -> tuple[str, int, list[str]]:
     if not isinstance(url, str) or len(url) > 2048 or "\r" in url or "\n" in url:
         raise CallbackError("invalid_url", "invalid callback URL")
     parts = urlsplit(url)
@@ -115,7 +128,15 @@ def _validate_callback(url: str) -> tuple[str, int, list[str]]:
         raise CallbackError("invalid_url", "invalid callback port") from None
     if not 1 <= port <= 65535:
         raise CallbackError("invalid_url", "invalid callback port")
-    return parts.hostname, port, _resolve_public(parts.hostname, port)
+    remaining = (
+        max(0.1, deadline - time.monotonic())
+        if deadline is not None
+        else CALLBACK_TIMEOUT
+    )
+    addresses = _resolve_public(parts.hostname, port, timeout=remaining)[:MAX_CALLBACK_ADDRESSES]
+    if not addresses:
+        raise CallbackError("dns_failed", "callback host has no addresses")
+    return parts.hostname, port, addresses
 
 
 def validate_callback_url(url: str) -> tuple[str, int]:
@@ -124,8 +145,9 @@ def validate_callback_url(url: str) -> tuple[str, int]:
 
 
 def _post(url: str, body: bytes, headers: dict) -> tuple[int, bytes]:
+    deadline = time.monotonic() + CALLBACK_TOTAL_TIMEOUT
     parts = urlsplit(url)
-    host, port, addresses = _validate_callback(url)
+    host, port, addresses = _validate_callback(url, deadline=deadline)
     path = parts.path or "/"
     if parts.query:
         path += "?" + parts.query
@@ -133,17 +155,30 @@ def _post(url: str, body: bytes, headers: dict) -> tuple[int, bytes]:
     for address in addresses:
         connection = None
         sock = None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         try:
             # Pin the address that was just validated, while keeping the
             # original hostname for SNI and certificate verification.
-            sock = socket.create_connection((address, port), timeout=CALLBACK_TIMEOUT)
+            sock = socket.create_connection(
+                (address, port), timeout=min(CALLBACK_TIMEOUT, remaining)
+            )
             context = ssl.create_default_context()
             wrapped = context.wrap_socket(sock, server_hostname=host)
-            connection = http.client.HTTPSConnection(host, port, timeout=CALLBACK_TIMEOUT)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CallbackError("timeout", "callback deadline exceeded")
+            wrapped.settimeout(min(CALLBACK_TIMEOUT, remaining))
+            connection = http.client.HTTPSConnection(
+                host, port, timeout=min(CALLBACK_TIMEOUT, remaining)
+            )
             connection.sock = wrapped
             connection.request("POST", path, body=body, headers=headers)
             response = connection.getresponse()
             data = response.read(MAX_RESPONSE_BYTES + 1)
+            if time.monotonic() > deadline:
+                raise CallbackError("timeout", "callback deadline exceeded")
             if len(data) > MAX_RESPONSE_BYTES:
                 raise CallbackError("response_too_large", "callback response too large")
             return response.status, data
@@ -268,16 +303,19 @@ class MCPEvents:
         self.cfg = service.settings
 
     def discover(self) -> dict:
+        base = self.cfg.base_url.rstrip("/")
         return {
             "resultType": "complete",
             "supportedVersions": ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"],
             "capabilities": {"tools": {}, "events": {}},
             "instructions": (
-                "Quant private subscription. Use read_content and read_attachment "
-                "after a report event; acknowledge only after processing. MCP Events "
-                "delivers new reports without agent polling. After the owner approves "
-                "a checkout on the website, prepare_checkout returns a QR image to show "
-                "inline; never open a browser for the owner."
+                f"Quant private reports. Follow {base}/skill.md; protocol: "
+                f"{base}/agent/instructions. Use MCP Events only when this client "
+                "supports registered callbacks. Read each report and all attachments, "
+                "verify them, then acknowledge; withdrawals and account notices follow "
+                "the protocol's separate branches. Checkout requires the owner's "
+                "explicit confirmation of the live plan, price, method and terms; show "
+                "its QR directly. Tools alone do not provide background delivery."
             ),
             "ttlMs": 3600000,
             "cacheScope": "public",
@@ -430,91 +468,165 @@ class MCPEvents:
                 )
         return len(rows)
 
-    def deliver(self, subscription_id: str, event_id: str):
+    def _skip_delivery(self, db, delivery_id: str, reason: str, *, deactivate=None):
         now = time.time()
-        sub = self.s.db.one(
-            "SELECT m.*,s.status sub_status,s.expires_at sub_expires,s.agent_enabled,b.state binding_state,u.email "
-            "FROM mcp_event_subscriptions m JOIN subscriptions s ON s.user_id=m.user_id AND s.product_id='quantgt' "
-            "JOIN bindings b ON b.id=m.binding_id JOIN users u ON u.id=m.user_id WHERE m.id=?",
-            (subscription_id,),
+        db.execute(
+            "UPDATE mcp_event_deliveries SET state='skipped',last_error=?,updated_at=? "
+            "WHERE id=? AND state NOT IN ('accepted','skipped')",
+            (reason, now, delivery_id),
         )
-        event = self.s.db.one(
-            "SELECT e.*,c.current_version,c.withdrawn,v.number version,v.title vtitle,v.body vbody,"
-            "(SELECT title FROM versions WHERE content_id=e.content_id ORDER BY number DESC LIMIT 1) latest_title "
-            "FROM events e LEFT JOIN contents c ON c.id=e.content_id "
-            "LEFT JOIN versions v ON v.id=e.version_id WHERE e.id=?",
-            (event_id,),
-        )
-        delivery = self.s.db.one(
-            "SELECT * FROM mcp_event_deliveries WHERE subscription_id=? AND event_id=?",
-            (subscription_id, event_id),
-        )
-        if not sub or not event or not delivery:
-            raise Problem("MCP event delivery no longer exists", 404)
-        if not self.s._email_allowed(sub["email"]):
-            with self.s.db.transaction() as db:
+        if deactivate is not None:
+            db.execute(
+                "UPDATE mcp_event_subscriptions SET active=0,last_error=?,updated_at=? WHERE id=?",
+                (reason, now, deactivate),
+            )
+
+    def deliver(self, subscription_id: str, event_id: str):
+        """Claim and send one MCP event.
+
+        Authorization, withdrawal state and the sending transition are checked
+        in one database transaction. Once that commits the attempt is in
+        flight; network I/O never holds the writer. Attempt fencing prevents a
+        stale worker from overwriting a newer accepted/skipped result.
+        """
+        now = time.time()
+        with self.s.db.transaction() as db:
+            sub = db.execute(
+                "SELECT m.*,s.status sub_status,s.expires_at sub_expires,s.agent_enabled,"
+                "b.state binding_state,u.email "
+                "FROM mcp_event_subscriptions m "
+                "JOIN subscriptions s ON s.user_id=m.user_id AND s.product_id='quantgt' "
+                "JOIN bindings b ON b.id=m.binding_id JOIN users u ON u.id=m.user_id "
+                "WHERE m.id=?",
+                (subscription_id,),
+            ).fetchone()
+            event = db.execute(
+                "SELECT e.*,c.current_version,c.withdrawn,v.number version,v.title vtitle,v.body vbody,"
+                "(SELECT title FROM versions WHERE content_id=e.content_id ORDER BY number DESC LIMIT 1) latest_title "
+                "FROM events e LEFT JOIN contents c ON c.id=e.content_id "
+                "LEFT JOIN versions v ON v.id=e.version_id WHERE e.id=?",
+                (event_id,),
+            ).fetchone()
+            delivery = db.execute(
+                "SELECT * FROM mcp_event_deliveries WHERE subscription_id=? AND event_id=?",
+                (subscription_id, event_id),
+            ).fetchone()
+            if not sub or not event or not delivery:
+                raise Problem("MCP event delivery no longer exists", 404)
+            # A callback accepted by the remote endpoint is a terminal transport
+            # result. A reclaimed job must not post the same event again.
+            if delivery["state"] in ("accepted", "skipped", "failed"):
+                return
+            # A recent `sending` row belongs to another in-flight attempt (or a
+            # worker whose lease has not expired). Only a stale claim is
+            # recoverable; this prevents duplicate posts during overlap.
+            if (
+                delivery["state"] == "sending"
+                and delivery["updated_at"] > now - DELIVERY_LEASE_SECONDS
+            ):
+                return
+            if event["product_id"] != "quantgt":
+                self._skip_delivery(db, delivery["id"], "product mismatch")
+                return
+            allowed = not self.s.settings.allowed_emails or sub["email"] in self.s.settings.allowed_emails or bool(
                 db.execute(
-                    "UPDATE mcp_event_subscriptions SET active=0,last_error='access revoked',updated_at=? WHERE id=?",
-                    (now, subscription_id),
+                    "SELECT email FROM access_allowlist WHERE email=?", (sub["email"],)
+                ).fetchone()
+            )
+            if not allowed:
+                self._skip_delivery(
+                    db, delivery["id"], "access revoked", deactivate=subscription_id
                 )
+                return
+            if (
+                not sub["active"]
+                or sub["refresh_before"] <= now
+                or sub["binding_state"] != "active"
+                or sub["sub_status"] != "active"
+                or (sub["sub_expires"] is not None and sub["sub_expires"] <= now)
+                or not sub["agent_enabled"]
+            ):
+                self._skip_delivery(
+                    db, delivery["id"], "access revoked", deactivate=subscription_id
+                )
+                return
+            if event["content_id"] is None or event["current_version"] is None:
+                self._skip_delivery(db, delivery["id"], "content missing")
+                return
+            is_withdrawal = event["kind"] == "withdrawn"
+            # A queued publication/update must never carry a report body after
+            # the owner withdrew it. The separate withdrawal event is the only
+            # notification allowed to describe the retraction.
+            if not is_withdrawal and event["withdrawn"]:
+                self._skip_delivery(db, delivery["id"], "content withdrawn")
+                return
+            if is_withdrawal and not event["withdrawn"]:
+                self._skip_delivery(db, delivery["id"], "withdrawal event mismatch")
+                return
+            if not is_withdrawal and event["version"] is None:
+                self._skip_delivery(db, delivery["id"], "version missing")
+                return
+            version = int(event["version"] or event["current_version"] or 1)
+            if is_withdrawal:
+                # Keep only a recognizable title and the retraction reason.
+                title = event["latest_title"] or event["summary"] or "Quant update"
+                summary = event["summary"] or ""
+            else:
+                title = event["vtitle"] or event["summary"] or "Quant update"
+                summary = event["vbody"] or ""
+            payload = {
+                "eventId": event_id,
+                "name": EVENT_NAME,
+                "timestamp": _iso(event["created_at"]),
+                "data": {
+                    "event_id": event_id,
+                    "content_id": event["content_id"],
+                    "version": version,
+                    "title": title,
+                    "summary": summary[:1000],
+                    "change_type": "withdrawn" if is_withdrawal else event["kind"],
+                    "withdrawn": bool(is_withdrawal),
+                    "published_at": _iso(event["created_at"]),
+                    "url": self.cfg.base_url.rstrip("/") + "/read/" + event["content_id"],
+                },
+            }
+            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            if len(body) > MAX_BODY:
                 db.execute(
-                    "UPDATE mcp_event_deliveries SET state='skipped',last_error='access revoked',updated_at=? WHERE id=?",
+                    "UPDATE mcp_event_deliveries SET state='failed',last_error='payload too large',updated_at=? "
+                    "WHERE id=? AND state NOT IN ('accepted','skipped','failed')",
                     (now, delivery["id"]),
                 )
-            return
-        if event["product_id"] != "quantgt":
+                return
+            expected_attempts = int(delivery["attempts"]) + 1
+            claimed = db.execute(
+                "UPDATE mcp_event_deliveries SET state='sending',attempts=?,updated_at=? "
+                "WHERE id=? AND attempts=? AND "
+                "(state IN ('queued','retrying') OR (state='sending' AND updated_at<=?))",
+                (
+                    expected_attempts,
+                    now,
+                    delivery["id"],
+                    int(delivery["attempts"]),
+                    now - DELIVERY_LEASE_SECONDS,
+                ),
+            ).rowcount
+            if not claimed:
+                return
+            callback_url = sub["callback_url"]
+            encrypted_secret = sub["secret"]
+        # The claim is committed; this attempt is in flight. Build the signature
+        # outside the writer transaction.
+        try:
+            key = _secret_key(decrypt(self.cfg.secret, encrypted_secret))
+        except (CallbackError, ValueError):
             with self.s.db.transaction() as db:
                 db.execute(
-                    "UPDATE mcp_event_deliveries SET state='skipped',last_error='product mismatch',updated_at=? WHERE id=?",
-                    (now, delivery["id"]),
+                    "UPDATE mcp_event_deliveries SET state='failed',last_error='invalid_secret',updated_at=? "
+                    "WHERE id=? AND state='sending' AND attempts=?",
+                    (time.time(), delivery["id"], expected_attempts),
                 )
-            return
-        if (
-            not sub["active"]
-            or sub["refresh_before"] <= now
-            or sub["binding_state"] != "active"
-            or sub["sub_status"] != "active"
-            or (sub["sub_expires"] is not None and sub["sub_expires"] <= now)
-            or not sub["agent_enabled"]
-        ):
-            with self.s.db.transaction() as db:
-                db.execute(
-                    "UPDATE mcp_event_subscriptions SET active=0,last_error='access revoked',updated_at=? WHERE id=?",
-                    (now, subscription_id),
-                )
-                db.execute(
-                    "UPDATE mcp_event_deliveries SET state='skipped',last_error='access revoked',updated_at=? WHERE id=?",
-                    (now, delivery["id"]),
-                )
-            return
-        version = int(event["version"] or event["current_version"] or 1)
-        title = event["vtitle"] or event["latest_title"] or event["summary"] or "Quant update"
-        summary = (event["vbody"] if event["kind"] != "withdrawn" else event["summary"]) or ""
-        payload = {
-            "eventId": event_id,
-            "name": EVENT_NAME,
-            "timestamp": _iso(event["created_at"]),
-            "data": {
-                "event_id": event_id,
-                "content_id": event["content_id"],
-                "version": version,
-                "title": title,
-                "summary": summary[:1000],
-                "change_type": "withdrawn" if event["kind"] == "withdrawn" or event["withdrawn"] else event["kind"],
-                "withdrawn": bool(event["withdrawn"] or event["kind"] == "withdrawn"),
-                "published_at": _iso(event["created_at"]),
-                "url": self.cfg.base_url.rstrip("/") + "/read/" + event["content_id"],
-            },
-        }
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-        if len(body) > MAX_BODY:
-            with self.s.db.transaction() as db:
-                db.execute(
-                    "UPDATE mcp_event_deliveries SET state='failed',last_error='payload too large',updated_at=? WHERE id=?",
-                    (now, delivery["id"]),
-                )
-            raise DeliveryError("MCP event payload too large", retry=False)
-        key = _secret_key(decrypt(self.cfg.secret, sub["secret"]))
+            raise DeliveryError("MCP callback secret is invalid", retry=False) from None
         timestamp = str(int(time.time()))
         headers = {
             "Content-Type": "application/json",
@@ -525,30 +637,40 @@ class MCPEvents:
             "User-Agent": "Quant-MCP-Events/1.0",
         }
         try:
-            status, response = _post(sub["callback_url"], body, headers)
+            status, response = _post(callback_url, body, headers)
         except CallbackError as exc:
             with self.s.db.transaction() as db:
                 db.execute(
-                    "UPDATE mcp_event_deliveries SET state='retrying',attempts=attempts+1,last_error=?,updated_at=? WHERE id=?",
-                    (exc.reason, now, delivery["id"]),
+                    "UPDATE mcp_event_deliveries SET state='retrying',last_error=?,updated_at=? "
+                    "WHERE id=? AND state='sending' AND attempts=?",
+                    (exc.reason, time.time(), delivery["id"], expected_attempts),
                 )
             raise DeliveryError("MCP callback: " + exc.reason, retry=True)
         if 200 <= status < 300:
             with self.s.db.transaction() as db:
-                db.execute(
-                    "UPDATE mcp_event_deliveries SET state='accepted',attempts=attempts+1,last_error=NULL,updated_at=? WHERE id=?",
-                    (now, delivery["id"]),
-                )
-                db.execute(
-                    "UPDATE mcp_event_subscriptions SET last_error=NULL,updated_at=? WHERE id=?",
-                    (now, subscription_id),
-                )
+                updated = db.execute(
+                    "UPDATE mcp_event_deliveries SET state='accepted',last_error=NULL,updated_at=? "
+                    "WHERE id=? AND state='sending' AND attempts=?",
+                    (time.time(), delivery["id"], expected_attempts),
+                ).rowcount
+                if updated:
+                    db.execute(
+                        "UPDATE mcp_event_subscriptions SET last_error=NULL,updated_at=? WHERE id=?",
+                        (time.time(), subscription_id),
+                    )
             return
         retryable = status in (408, 425, 429) or status >= 500
         with self.s.db.transaction() as db:
             db.execute(
-                "UPDATE mcp_event_deliveries SET state=?,attempts=attempts+1,last_error=?,updated_at=? WHERE id=?",
-                ("retrying" if retryable else "failed", f"HTTP {status}", now, delivery["id"]),
+                "UPDATE mcp_event_deliveries SET state=?,last_error=?,updated_at=? "
+                "WHERE id=? AND state='sending' AND attempts=?",
+                (
+                    "retrying" if retryable else "failed",
+                    f"HTTP {status}",
+                    time.time(),
+                    delivery["id"],
+                    expected_attempts,
+                ),
             )
         if not retryable:
             raise DeliveryError("MCP callback rejected the event", retry=False)

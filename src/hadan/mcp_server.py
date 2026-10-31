@@ -276,7 +276,7 @@ def get_member(email: str) -> CallToolResult:
 def list_deliveries(email: str | None = None, limit: int = 20) -> CallToolResult:
     """Recent delivery records, optionally filtered by member email."""
     def run():
-        limit = max(1, min(int(limit), 200))
+        effective_limit = max(1, min(int(limit), 200))
         s = _service()
         if email:
             addr = _member_email(email)
@@ -284,13 +284,13 @@ def list_deliveries(email: str | None = None, limit: int = 20) -> CallToolResult
                 "SELECT d.id,u.email,d.channel,d.state,d.provider_id,d.error,d.created_at,d.updated_at "
                 "FROM deliveries d JOIN users u ON u.id=d.user_id WHERE u.email=? "
                 "ORDER BY d.created_at DESC LIMIT ?",
-                (addr, limit),
+                (addr, effective_limit),
             )
         else:
             rows = s.db.all(
                 "SELECT d.id,u.email,d.channel,d.state,d.provider_id,d.error,d.created_at,d.updated_at "
                 "FROM deliveries d JOIN users u ON u.id=d.user_id ORDER BY d.created_at DESC LIMIT ?",
-                (limit,),
+                (effective_limit,),
             )
         for row in rows:
             row["created_at_iso"] = _iso(row["created_at"])

@@ -39,7 +39,7 @@ def signing(monkeypatch):
             if files:
                 message.add_attachment(b"authenticated report", maintype="application", subtype="octet-stream", filename="report.xlsx")
             raw = message.as_bytes()
-        included = headers or [b"from", b"to", b"subject", b"message-id", b"content-type", b"mime-version"]
+        included = headers or [b"from", b"to", b"subject", b"message-id", b"content-type", b"mime-version", b"content-transfer-encoding"]
         signature = dkim.sign(raw, b"fixture", (domain or sender.split("@")[1]).encode(), pem, include_headers=included, canonicalize=(b"simple", b"simple"), length=length)
         return signature + raw
 
@@ -194,7 +194,7 @@ def test_duplicate_interpretation_headers_are_rejected(harness, signing, header)
 
 def test_curated_unsigned_message_id_cannot_replay_the_same_signed_body(harness, signing):
     _, service, _ = harness
-    raw = signing(sender=OWNER, files=False, headers=[b"from", b"to", b"subject"])
+    raw = signing(sender=OWNER, files=False, headers=[b"from", b"to", b"subject", b"content-type", b"mime-version", b"content-transfer-encoding"])
     first = jobs.ingest_message(service, raw, "fixture-mailbox")
     changed = raw.replace(b"<fixture-original@example.test>", b"<attacker-replay@example.test>")
     second = jobs.ingest_message(service, changed, "fixture-mailbox")
@@ -349,3 +349,46 @@ def test_search_command_injection_is_rejected(harness, mailbox, monkeypatch):
     with pytest.raises(ValueError, match="IMAP_SEARCH"):
         jobs.official_mail(service)
     assert not any(call[0] in ("search", "fetch") for call in calls)
+
+
+def test_unsigned_subject_uses_generic_title_not_attacker_subject(harness, signing):
+    _, service, _ = harness
+    raw = signing(
+        subject="Untrusted replacement subject",
+        body="Verified official body",
+        files=False,
+        headers=[
+            b"from",
+            b"to",
+            b"message-id",
+            b"content-type",
+            b"mime-version",
+            b"content-transfer-encoding",
+        ],
+    )
+    result = jobs.ingest_message(service, raw, "fixture-mailbox")
+    version = service.db.one("SELECT * FROM versions WHERE content_id=?", (result["id"],))
+    assert version["title"] == "Quant GT · 官方邮件更新"
+    assert "Untrusted replacement subject" not in version["title"]
+    assert "Verified official body" in version["body"]
+
+
+def test_unsigned_content_type_or_transfer_encoding_is_quarantined(harness, signing):
+    _, service, _ = harness
+    missing_content_type = signing(
+        body="Verified official body",
+        files=False,
+        headers=[b"from", b"to", b"subject", b"mime-version", b"content-transfer-encoding"],
+    )
+    result = jobs.ingest_message(service, missing_content_type, "fixture-mailbox")
+    assert result["quarantined"] is True
+    assert service.db.all("SELECT * FROM contents") == []
+
+    missing_cte = signing(
+        body="Verified official body",
+        files=False,
+        headers=[b"from", b"to", b"subject", b"content-type", b"mime-version"],
+    )
+    result = jobs.ingest_message(service, missing_cte, "fixture-mailbox")
+    assert result["quarantined"] is True
+    assert service.db.all("SELECT * FROM contents") == []

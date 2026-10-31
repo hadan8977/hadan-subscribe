@@ -163,12 +163,17 @@ def since_signal(row: Dict[str, Any], as_of: datetime | None = None) -> float | 
     None when `as_of` is earlier than the row's `signal_at`.
     """
     signal_at = row.get("signal_at")
-    if as_of is not None and signal_at:
+    if signal_at not in (None, ""):
         try:
-            if as_of < datetime.fromisoformat(str(signal_at).replace("Z", "+00:00")):
+            parsed = datetime.fromisoformat(str(signal_at).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            # Never guess a timezone or publish an unverified since-signal move.
+            return None
+        if parsed.tzinfo is None:
+            return None
+        if as_of is not None:
+            if as_of.tzinfo is None or as_of < parsed:
                 return None
-        except ValueError:
-            pass
     start, now = (
         parse_money(row.get("signal_price")),
         parse_money(row.get("current_price")),

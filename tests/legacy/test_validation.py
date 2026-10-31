@@ -239,3 +239,38 @@ class ValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateTickerValidationTests(unittest.TestCase):
+    def _duplicate_cases(self):
+        def duplicate_weekly_same(data):
+            data["weekly"]["rows"][1] = dict(data["weekly"]["rows"][0])
+
+        def duplicate_weekly_case(data):
+            data["weekly"]["rows"][1]["symbol"] = data["weekly"]["rows"][0]["symbol"].lower()
+
+        def duplicate_monthly(data):
+            data["monthly"]["rows"].append(dict(data["monthly"]["rows"][0]))
+
+        def weekly_completeness_counts_unique(data):
+            # 10 rows but only 7 unique tickers must not pass as a near-complete Top 10.
+            for index in range(3, 10):
+                data["weekly"]["rows"][index]["symbol"] = f"W{(index % 3) + 1}"
+
+        return {
+            "duplicate weekly content": (duplicate_weekly_same, "duplicate symbols"),
+            "duplicate weekly case": (duplicate_weekly_case, "duplicate symbols"),
+            "duplicate monthly content": (duplicate_monthly, "duplicate symbols"),
+            "unique count below near-complete": (
+                weekly_completeness_counts_unique,
+                "unique rows|duplicate symbols",
+            ),
+        }
+
+    def test_duplicate_tickers_are_rejected_everywhere(self):
+        for name, (mutate, message) in self._duplicate_cases().items():
+            with self.subTest(name):
+                data = valid_capture()
+                mutate(data)
+                with self.assertRaisesRegex(RuntimeError, message):
+                    validate_member_picks_data(data)

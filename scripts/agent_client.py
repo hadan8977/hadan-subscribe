@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -97,59 +98,153 @@ def complete_pair(origin, credential, credential_file):
     request(origin, "/api/agent/test/complete", credential, {})
 
 
-def consume(origin, credential, destination, ack=False):
-    events = json.loads(request(origin, "/api/events?pending=true", credential))[
-        "events"
-    ]
+def consume(origin, credential, destination, ack=False, *, after=0):
     saved = 0
-    for event in events:
-        eid = event["id"]
-        cid = event["content_id"]
-        if not re.fullmatch(r"[a-f0-9]{32}", eid) or (
-            cid is not None and not re.fullmatch(r"[a-f0-9]{32}", cid)
-        ):
-            raise ValueError("Invalid event identity")
-        folder = Path(destination) / (cid or "account") / eid
-        if event["kind"].startswith("account:"):
-            pass
-        elif event["kind"] == "withdrawn" or event.get("withdrawn"):
-            # Mark withdrawal; local retention/deletion follows the user's agent policy.
-            save(
-                Path(destination) / cid / "WITHDRAWN.json",
-                json.dumps(event, ensure_ascii=False).encode(),
+    pages = 0
+    while True:
+        page = json.loads(
+            request(
+                origin,
+                "/api/events?pending=true&limit=100&after=" + str(after),
+                credential,
             )
-        else:
-            content = json.loads(
-                request(
-                    origin,
-                    "/api/content/" + cid + "?version=" + str(event["version"]),
-                    credential,
-                )
-            )
-            for a in content["attachments"]:
-                data = request(origin, "/api/files/" + a["id"], credential)
-                if (
-                    len(data) != a["size"]
-                    or hashlib.sha256(data).hexdigest() != a["sha256"]
-                ):
-                    raise ValueError("Attachment verification failed")
+        )
+        events = page.get("events", [])
+        pages += 1
+        for event in events:
+            eid = event["id"]
+            cid = event["content_id"]
+            if not re.fullmatch(r"[a-f0-9]{32}", eid) or (
+                cid is not None and not re.fullmatch(r"[a-f0-9]{32}", cid)
+            ):
+                raise ValueError("Invalid event identity")
+            folder = Path(destination) / (cid or "account") / eid
+            if event["kind"].startswith("account:"):
+                pass
+            elif event["kind"] == "withdrawn" or event.get("withdrawn"):
+                # Mark withdrawal; local retention/deletion follows the user's agent policy.
                 save(
-                    folder / (a["id"] + "-" + Path(a["name"].replace("\\", "/")).name),
-                    data,
+                    Path(destination) / cid / "WITHDRAWN.json",
+                    json.dumps(event, ensure_ascii=False).encode(),
                 )
-            save(
-                folder / "content.json",
-                json.dumps(content, ensure_ascii=False, indent=2).encode(),
-            )
-        save(folder / "event.json", json.dumps(event, ensure_ascii=False).encode())
-        saved += 1
-        if ack:
-            request(origin, "/api/events/" + eid + "/ack", credential, {})
+            else:
+                content = json.loads(
+                    request(
+                        origin,
+                        "/api/content/" + cid + "?version=" + str(event["version"]),
+                        credential,
+                    )
+                )
+                for attachment in content["attachments"]:
+                    data = request(origin, "/api/files/" + attachment["id"], credential)
+                    if (
+                        len(data) != attachment["size"]
+                        or hashlib.sha256(data).hexdigest() != attachment["sha256"]
+                    ):
+                        raise ValueError("Attachment verification failed")
+                    save(
+                        folder
+                        / (
+                            attachment["id"]
+                            + "-"
+                            + Path(attachment["name"].replace("\\", "/")).name
+                        ),
+                        data,
+                    )
+                save(
+                    folder / "content.json",
+                    json.dumps(content, ensure_ascii=False, indent=2).encode(),
+                )
+            save(folder / "event.json", json.dumps(event, ensure_ascii=False).encode())
+            saved += 1
+            if ack:
+                request(origin, "/api/events/" + eid + "/ack", credential, {})
+        if len(events) < 100:
+            break
+        next_cursor = int(page.get("next_cursor") or after)
+        if next_cursor <= after:
+            break
+        after = next_cursor
     return {
         "saved": saved,
+        "pages": pages,
         "acknowledged": ack,
         "processing_definition": "Durably saved to the local agent inbox; no financial/action automation",
     }
+
+
+def _check_time(value):
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Schedule check has no timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _schedule_checks(schedule):
+    checks = []
+    for scan in schedule.get("scans", []):
+        values = scan.get("checks")
+        if not values:
+            values = [{"check_at_new_york": value} for value in scan.get("checks_new_york", [])]
+        for index, item in enumerate(values):
+            check_id = item.get("check_id") or (
+                f"{scan.get('kind')}:{scan.get('scan_at_new_york')}:{index + 1}"
+            )
+            checks.append((_check_time(item["check_at_new_york"]), check_id))
+    return sorted(checks)
+
+
+def _load_executed(path):
+    if not path.exists():
+        return set()
+    try:
+        value = json.loads(path.read_text())
+        return set(value.get("executed", []))
+    except (ValueError, OSError):
+        return set()
+
+
+def _save_executed(path, executed):
+    save(
+        path,
+        json.dumps({"executed": sorted(executed)[-500:]}, ensure_ascii=False).encode(),
+    )
+
+
+def watch(origin, credential, destination, *, ack=False, interval=300, state_file=None):
+    """Run only at server-advertised check times; never poll events 24/7."""
+    interval = max(30, int(interval))
+    state = Path(state_file) if state_file else Path(destination) / ".quant-schedule-state.json"
+    executed = _load_executed(state)
+    # A single `consume` remains the explicit on-demand/recovery read. The
+    # watch loop itself never calls the event feed outside advertised checks.
+    while True:
+        try:
+            schedule = json.loads(request(origin, "/api/agent/schedule", credential))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                raise ValueError(
+                    "Agent authorization or subscription is no longer valid; "
+                    "do not switch accounts or recreate credentials blindly"
+                ) from exc
+            time.sleep(interval)
+            continue
+        except (urllib.error.URLError, TimeoutError, OSError):
+            time.sleep(interval)
+            continue
+        checks = [item for item in _schedule_checks(schedule) if item[1] not in executed]
+        if not checks:
+            time.sleep(min(interval, 3600))
+            continue
+        due_at, check_id = checks[0]
+        wait = (due_at - datetime.now(timezone.utc)).total_seconds()
+        if wait > 0:
+            # Refreshing the schedule does not touch the event feed.
+            time.sleep(min(wait, interval))
+            continue
+        print(json.dumps(consume(origin, credential, destination, ack), ensure_ascii=False), flush=True)
+        executed.add(check_id)
+        _save_executed(state, executed)
 
 
 def main():
@@ -217,7 +312,16 @@ def main():
             complete_pair(origin, credential, file)
             print("Connected; saved credential and test files verified.")
             return
-        while True:
+        if args.watch:
+            watch(
+                origin,
+                credential,
+                args.directory,
+                ack=args.ack,
+                interval=args.interval,
+                state_file=file.with_name(file.name + ".schedule-state.json"),
+            )
+        else:
             print(
                 json.dumps(
                     consume(origin, credential, args.directory, args.ack),
@@ -225,9 +329,6 @@ def main():
                 ),
                 flush=True,
             )
-            if not args.watch:
-                break
-            time.sleep(max(args.interval, 30))
 
 
 if __name__ == "__main__":

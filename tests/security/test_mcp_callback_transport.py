@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ssl
+import pytest
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -64,7 +65,7 @@ def test_pinned_callback_post_uses_validated_address_and_path(tmp_path, monkeypa
     port = server.server_address[1]
     try:
         monkeypatch.setattr(
-            "hadan.mcp_events._resolve_public", lambda host, port: ["127.0.0.1"]
+            "hadan.mcp_events._resolve_public", lambda host, port, timeout=None: ["127.0.0.1"]
         )
         monkeypatch.setattr(
             "hadan.mcp_events.ssl.create_default_context",
@@ -82,3 +83,24 @@ def test_pinned_callback_post_uses_validated_address_and_path(tmp_path, monkeypa
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_callback_has_a_total_deadline_including_resolution(monkeypatch):
+    import time
+
+    from hadan.mcp_events import CallbackError
+
+    monkeypatch.setattr(mcp_events, "CALLBACK_TOTAL_TIMEOUT", 0.15)
+
+    def slow_validation(url, *, deadline=None):
+        time.sleep(0.25)
+        return "example.com", 443, ["1.1.1.1"]
+
+    monkeypatch.setattr(mcp_events, "_validate_callback", slow_validation)
+    with pytest.raises(CallbackError) as raised:
+        mcp_events._post(
+            "https://example.com/callback",
+            b"{}",
+            {"Content-Type": "application/json"},
+        )
+    assert raised.value.reason == "timeout"

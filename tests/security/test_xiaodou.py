@@ -18,8 +18,8 @@ from hadan.service import Problem
 from hadan.terms import TERMS_VERSION
 from hadan.xiaodou import Xiaodou, PLATFORM_KID, canonical_request, encoded
 
-END = datetime.fromisoformat('2030-01-01T00:00:00+08:00').timestamp()
-PLAN = {'id':'sample-plan','title':'Quant 订阅','valid_until':'2030-01-01T00:00:00+08:00','amount_minor':1000,'currency':'CNY'}
+END = datetime.fromisoformat('2027-05-01T00:00:00+08:00').timestamp()
+PLAN = {'id':'quant-2027-april','title':'Quant 订阅','valid_until':'2027-05-01T00:00:00+08:00','amount_minor':1500,'currency':'CNY'}
 
 
 @pytest.fixture
@@ -53,10 +53,10 @@ def xd(harness, tmp_path, monkeypatch):
         calls.append({'body':raw,'method':request.method,'headers':dict(h),'path':request.url.path})
         if mode['timeout']:raise httpx.ReadTimeout('synthetic timeout',request=request)
         if request.method=='POST':
-            body=json.loads(raw); oid=body['outTradeNo'];assert body['amountFen']==1000 and body['feeBearer']=='SELLER'
+            body=json.loads(raw); oid=body['outTradeNo'];assert body['amountFen']==1500 and body['feeBearer']=='SELLER'
             assert body['payerClientIp']=='8.8.8.8';assert 'notifyUrl' not in body
             assert body['returnUrl']=='https://testserver/app?order='+oid
-            snap={'openOrderId':'op_'+oid,'outTradeNo':oid,'status':mode['status'],'channel':body['channel'],'tradeScope':'CARD_VIRTUAL','amountFen':1000,'currency':'CNY','feeBearer':'SELLER','expireAt':datetime.fromtimestamp(time.time()+600).astimezone().isoformat(),'payUrl':'https://cashier.example.test/cashier/material-'+oid,'qrCode':'https://qr.alipay.com/material-'+oid if body['channel']=='ALIPAY_H5' else None}
+            snap={'openOrderId':'op_'+oid,'outTradeNo':oid,'status':mode['status'],'channel':body['channel'],'tradeScope':'CARD_VIRTUAL','amountFen':1500,'currency':'CNY','feeBearer':'SELLER','expireAt':datetime.fromtimestamp(time.time()+600).astimezone().isoformat(),'payUrl':'https://cashier.example.test/cashier/material-'+oid,'qrCode':'https://qr.alipay.com/material-'+oid if body['channel']=='ALIPAY_H5' else None}
             snapshots[oid]=snap
         else:
             oid=request.url.path.rsplit('/',1)[-1];snap={**snapshots[oid],'status':mode['status'],'payUrl':None,'qrCode':None}
@@ -79,7 +79,7 @@ def buy(client,**changes):
 
 def notice(service,platform,oid,*,kind='PAYMENT_SUCCEEDED',event_id=None,stamp=None,**changes):
     eid=event_id or uid();stamp=str(int(time.time()) if stamp is None else stamp)
-    value={'eventId':eid,'eventType':kind,'appId':service.settings.xiaodou_app_id,'outTradeNo':oid,'eventAmountFen':1000 if kind=='PAYMENT_SUCCEEDED' else 0,'grossAmountFen':1000,'status':'SUCCEEDED' if kind=='PAYMENT_SUCCEEDED' else 'CLOSED','feeBearer':'SELLER','stateVersion':0,**changes}
+    value={'eventId':eid,'eventType':kind,'appId':service.settings.xiaodou_app_id,'outTradeNo':oid,'eventAmountFen':1500 if kind=='PAYMENT_SUCCEEDED' else 0,'grossAmountFen':1500,'status':'SUCCEEDED' if kind=='PAYMENT_SUCCEEDED' else 'CLOSED','feeBearer':'SELLER','stateVersion':0,**changes}
     raw=encoded(value).encode();nonce=uid()
     canonical='\n'.join(('XD-Webhook-v1',eid,kind,stamp,nonce,PLATFORM_KID,hashlib.sha256(raw).hexdigest())).encode()
     signature=base64.b64encode(platform.sign(canonical,padding.PKCS1v15(),hashes.SHA256())).decode()
@@ -123,7 +123,7 @@ def test_qr_purchase_fixed_end_date_and_private_qr(xd,method):
     r=buy(client,method=method,amount_minor=1,valid_until='2099-01-01')
     assert r.status_code==200,r.text
     order=r.json();oid=order['id']
-    assert order['access_until']==END and order['amount_minor']==1000
+    assert order['access_until']==END and order['amount_minor']==1500
     qr=client.get(order['qr_url']);assert qr.status_code==200 and qr.content.startswith(b'\x89PNG')
     assert qr.content[25]==2  # RGB, no alpha channel: opaque white background
     assert qr.headers['content-type'].startswith('image/png')
@@ -137,7 +137,7 @@ def test_qr_purchase_fixed_end_date_and_private_qr(xd,method):
     assert buy(client).status_code==409
 
 
-@pytest.mark.parametrize('change',[{'grossAmountFen':999},{'eventAmountFen':1001},{'eventAmountFen':1000.0},{'status':'CLOSED'},{'appId':'xdop_other00000000000'},{'feeBearer':'BUYER'}])
+@pytest.mark.parametrize('change',[{'grossAmountFen':1499},{'eventAmountFen':1501},{'eventAmountFen':1500.0},{'status':'CLOSED'},{'appId':'xdop_other00000000000'},{'feeBearer':'BUYER'}])
 def test_signed_wrong_payment_facts_never_grant(xd,change):
     _,s,client,user,key,*_=xd;oid=buy(client).json()['id']
     assert post_notice(client,notice(s,key,oid,**change)).status_code==400
@@ -217,7 +217,7 @@ def test_timeout_reuses_request_id_body_and_order_but_refreshes_nonce(xd):
 
 def test_frozen_service_end_survives_later_plan_change(xd):
     _,s,client,user,key,*_=xd;oid=buy(client).json()['id']
-    s.settings.payment_plans=[{**PLAN,'valid_until':'2030-08-01T00:00:00+08:00','amount_minor':9999}]
+    s.settings.payment_plans=[{**PLAN,'valid_until':'2027-08-01T00:00:00+08:00','amount_minor':9999}]
     assert post_notice(client,notice(s,key,oid)).status_code==200
     assert s.entitled(user['id'],'quantgt')['expires_at']==END
 
@@ -233,7 +233,7 @@ def test_expired_fixed_offer_stops_selling_and_rejects_ambiguous_periods(xd,monk
     _,s,client,user,key,calls,*_=xd
     s.settings.payment_plans=[{**PLAN,'valid_until':'2026-01-01T00:00:00+08:00'}]
     assert Commerce(s).plans()==[] and buy(client).status_code==404 and not calls
-    for bad in ({'valid_until':'2030-01-01'},{'days':30},{'valid_until':None}):
+    for bad in ({'valid_until':'2027-05-01'},{'days':30},{'valid_until':None}):
         s.settings.payment_plans=[{**PLAN,**bad}]
         with pytest.raises(Problem):Commerce(s).plans()
 
@@ -329,7 +329,7 @@ def test_agent_prepares_owner_approved_one_time_checkout_without_spending(xd):
         assert not calls and not s.entitled(user['id'],'quantgt')
         order=agent.post('/api/agent/checkout',json={});assert order.status_code==200,order.text
         order=order.json();assert order['id']==permission.json()['order_id'] and order['payment_by']=='owner'
-        assert order['amount_minor']==1000 and order['access_until']==END
+        assert order['amount_minor']==1500 and order['access_until']==END
         assert 'pay_url' not in order and 'qr_url' not in order
         assert order['qr_available'] is True and order['qr_image'].startswith('data:image/png;base64,')
         assert order['qr_download_url']=='https://testserver/api/agent/checkout/qr'
@@ -359,7 +359,7 @@ def test_mcp_prepare_checkout_returns_png_without_browser_handoff(xd):
         result=prepared['result'];assert result.get('isError') is not True
         value=json.loads(result['content'][0]['text'])
         assert value['qr_available'] is True and value['checkout_url'] is None
-        assert value['amount_minor']==1000 and value['payment_by']=='owner'
+        assert value['amount_minor']==1500 and value['payment_by']=='owner'
         image=result['content'][1]
         assert image['type']=='image' and image['mimeType']=='image/png'
         assert base64.b64decode(image['data']).startswith(b'\x89PNG')
@@ -386,7 +386,7 @@ def test_mcp_agent_can_start_checkout_after_chat_confirmation(xd):
         result=response['result'];assert result.get('isError') is not True
         value=json.loads(result['content'][0]['text'])
         assert value['qr_available'] is True and value['checkout_url'] is None
-        assert value['amount_minor']==1000 and value['payment_by']=='owner'
+        assert value['amount_minor']==1500 and value['payment_by']=='owner'
         assert result['content'][1]['type']=='image' and result['content'][1]['mimeType']=='image/png'
         assert base64.b64decode(result['content'][1]['data']).startswith(b'\x89PNG')
         again=agent.post('/mcp',json={"jsonrpc":"2.0","id":2,"method":"tools/call",
@@ -431,7 +431,7 @@ def test_agent_permission_expires_is_explicit_and_cannot_survive_revocation(xd):
 def test_agent_changed_quote_requires_new_human_agreement(xd):
     app,s,client,user,key,calls,*_=xd;bid,auth=pairing(client)
     assert authorize(client,bid).status_code==200
-    s.settings.payment_plans=[{**PLAN,'valid_until':'2030-06-01T00:00:00+08:00'}]
+    s.settings.payment_plans=[{**PLAN,'valid_until':'2027-06-01T00:00:00+08:00'}]
     with TestClient(app) as agent:
         r=agent.post('/api/agent/checkout',json={},headers=auth)
         assert r.status_code==403
@@ -447,12 +447,12 @@ def test_spoofed_forwarded_ip_does_not_authorize_payment(xd):
 
 def test_refund_before_payment_never_grants_access_and_records_fact(xd):
     _,s,client,user,key,*_=xd;oid=buy(client).json()['id']
-    refund=notice(s,key,oid,kind='REFUND_SUCCEEDED',status='SUCCEEDED',eventAmountFen=1000,outRefundNo='refund_'+uid())
+    refund=notice(s,key,oid,kind='REFUND_SUCCEEDED',status='SUCCEEDED',eventAmountFen=1500,outRefundNo='refund_'+uid())
     assert post_notice(client,refund).status_code==200
     assert post_notice(client,notice(s,key,oid)).status_code==200
     assert not s.entitled(user['id'],'quantgt')
     assert s.db.one('SELECT status FROM purchase_orders')['status']=='review'
-    assert s.db.one('SELECT amount_minor,status FROM purchase_refunds')=={'amount_minor':1000,'status':'succeeded'}
+    assert s.db.one('SELECT amount_minor,status FROM purchase_refunds')=={'amount_minor':1500,'status':'succeeded'}
     assert len(s.db.all('SELECT * FROM payments'))==1
     assert s.db.one("SELECT kind FROM incidents")['kind']=='payment_review'
     assert post_notice(client,refund).status_code==200
@@ -481,3 +481,44 @@ def test_existing_order_reconciles_when_new_checkout_disabled(xd):
     mode['status']='SUCCEEDED'
     assert Commerce(s).reconcile(oid)['status']=='SUCCEEDED'
     assert s.entitled(user['id'],'quantgt')['expires_at']==END
+
+
+def test_quote_id_rejects_a_changed_plan_before_agreement(xd):
+    app,s,client,user,key,calls,mode,snapshots=xd
+    options=client.get('/api/purchase-options').json()
+    plan=options['plans'][0]
+    assert plan['quote_id']
+    s.settings.payment_plans=[{**PLAN,'amount_minor':1600}]
+    response=buy(client,quote_id=plan['quote_id'])
+    assert response.status_code==409
+    assert response.json()['data']['quote_changed'] is True
+    assert calls==[]
+    assert s.db.one("SELECT id FROM purchase_orders") is None
+    assert not s.db.one("SELECT id FROM audit WHERE action='terms_accepted'")
+
+
+def test_quote_id_accepts_the_live_plan_and_orders_are_recoverable(xd):
+    app,s,client,user,key,calls,mode,snapshots=xd
+    plan=client.get('/api/purchase-options').json()['plans'][0]
+    response=buy(client,quote_id=plan['quote_id'])
+    assert response.status_code==200,response.text
+    order=response.json()
+    assert calls and order['amount_minor']==plan['amount_minor']
+    recent=client.get('/api/orders')
+    assert recent.status_code==200
+    assert order['id'] in {item['id'] for item in recent.json()['orders']}
+
+
+def test_conflicting_pending_order_returns_recovery_id_without_creating_another(xd):
+    app,s,client,user,key,calls,mode,snapshots=xd
+    first=buy(client)
+    assert first.status_code==200,first.text
+    order=first.json()
+    before=len(calls)
+    conflict=buy(client,method='alipay')
+    assert conflict.status_code==409
+    assert conflict.json()['data']=={'order_id':order['id'],'status':'pending'}
+    assert len(calls)==before
+    assert len(s.db.all("SELECT id FROM purchase_orders"))==1
+    recent=client.get('/api/orders').json()['orders']
+    assert [item['id'] for item in recent]==[order['id']]

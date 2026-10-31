@@ -223,20 +223,37 @@ class Xiaodou:
                 ).fetchone()
             if current:
                 if checkout_permission and current["id"] != checkout_permission:
-                    raise Problem("已有待确认订单，请先完成或核对原订单", 409)
+                    raise Problem(
+                        "已有待确认订单，请先完成或核对原订单",
+                        409,
+                        code="order_exists",
+                        data={"order_id": current["id"], "status": current["status"]},
+                    )
                 if current["provider"] != "xiaodou" or current["app_id"] != self.cfg.xiaodou_app_id or current["plan_id"] != plan_id or current["method"] != method:
-                    raise Problem("已有待确认订单，请先完成或核对原订单", 409)
+                    raise Problem(
+                        "已有待确认订单，请先完成或核对原订单",
+                        409,
+                        code="order_exists",
+                        data={"order_id": current["id"], "status": current["status"]},
+                    )
                 if current["status"] != "creating":
                     return self.public_order(dict(current))
                 order_id, request_id, body = current["id"], current["request_id"], current["request_body"]
             else:
                 # Unknown in-flight payments from another gateway also block a second charge.
-                if db.execute(
-                    "SELECT id FROM purchase_orders WHERE user_id=? AND "
-                    "(status IN ('verifying','review') OR (status IN ('creating','pending') AND expires_at>?))",
+                pending = db.execute(
+                    "SELECT id,status FROM purchase_orders WHERE user_id=? AND "
+                    "(status IN ('verifying','review') OR (status IN ('creating','pending') AND expires_at>?)) "
+                    "ORDER BY created_at DESC LIMIT 1",
                     (user_id, now),
-                ).fetchone():
-                    raise Problem("已有待确认订单，请先完成或核对原订单", 409)
+                ).fetchone()
+                if pending:
+                    raise Problem(
+                        "已有待确认订单，请先完成或核对原订单",
+                        409,
+                        code="order_exists",
+                        data={"order_id": pending["id"], "status": pending["status"]},
+                    )
                 order_id, request_id = checkout_permission or uid(), uid()
                 body = encoded({"outTradeNo": order_id, "channel": CHANNELS[method], "amountFen": plan["amount_minor"],
                     "currency": "CNY", "feeBearer": "SELLER", "subject": plan["title"],
