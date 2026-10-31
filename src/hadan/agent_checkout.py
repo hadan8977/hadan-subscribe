@@ -64,8 +64,14 @@ class AgentCheckout:
             raise Problem("付款参数无效", 400)
         with self.s.db.transaction() as db:
             self.s._limit(db, "agent-checkout:" + binding["id"], 6, 3600)
-        self.authorize(binding["user_id"], binding["id"], payload, payer_ip)
-        return self.prepare(binding)
+        result = self.authorize(binding["user_id"], binding["id"], payload, payer_ip)
+        permission = self.s.db.one(
+            "SELECT * FROM checkout_permissions WHERE id=? AND binding_id=? AND user_id=?",
+            (result["permission_id"], binding["id"], binding["user_id"]),
+        )
+        if not permission:
+            raise Problem("付款授权不存在或已失效", 404)
+        return self._prepare_permission(binding, permission)
 
     def _permission(self, binding):
         # Prefer the permission that already produced an order, so a newer
@@ -136,8 +142,7 @@ class AgentCheckout:
         )
         return Commerce(self.s).order(user_id, permission_id)
 
-    def prepare(self, binding):
-        permission = self._permission(binding)
+    def _prepare_permission(self, binding, permission):
         existing = self.s.db.one("SELECT id FROM purchase_orders WHERE id=? AND user_id=?", (permission["id"], binding["user_id"]))
         if existing and self.s.db.one("SELECT status FROM purchase_orders WHERE id=?", (existing["id"],))["status"] != "creating":
             return self._public(
@@ -150,6 +155,9 @@ class AgentCheckout:
         order = Commerce(self.s).create_order(binding["user_id"], permission["plan_id"], permission["method"],
             agreement_id=permission["agreement_id"], payer_ip=permission["payer_ip"], checkout_permission=permission["id"])
         return self._public(order, binding["user_id"], include_qr=True)
+
+    def prepare(self, binding):
+        return self._prepare_permission(binding, self._permission(binding))
 
     def qr(self, binding):
         permission = self._permission(binding)
