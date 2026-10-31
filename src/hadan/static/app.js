@@ -291,10 +291,6 @@
     $("#purchase-plan").innerHTML=plans.map(p=>'<option value="'+esc(p.id)+'">Quant · '+esc(p.access_until?t("plan_until",{date:new Intl.DateTimeFormat(lang==='en'?'en-GB':'zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(p.access_until*1000-1))}):t("plan_days",{days:p.days}))+' · '+esc(money(p.amount_minor,p.currency))+'</option>').join("");
     if(plans.some(p=>p.id===oldPlan))$("#purchase-plan").value=oldPlan;
     $("#purchase-methods").innerHTML=enabled.map((m,i)=>'<label><input type="radio" name="payment-method" value="'+esc(m.id)+'" '+(m.id===oldMethod||(!oldMethod&&i===0)?'checked':'')+' required>'+esc(t("method_"+m.id))+'</label>').join("");
-    const delegate = account?.bindings.find(b=>b.id===pairBindingId && b.state!=='revoked') || activeAgent();
-    $("#delegate-checkout-label").hidden = !delegate || !plans.some(p=>p.access_until);
-    $("#delegate-checkout-copy").textContent = delegate ? t("delegate_checkout",{name:delegate.name}) : '';
-    if(!delegate)$("#delegate-checkout").checked=false;
   }
   function renderOrder() {
     const target=$("#purchase-order");if(!target||!currentOrder)return;target.hidden=false;
@@ -445,13 +441,7 @@
     const method=$("input[name=payment-method]:checked")?.value;if(!method)return;
     if(!$("#accept-terms").checked||!agreedTermsVersion||agreedTermsVersion!==purchaseData?.terms_version)throw new Error(t("terms_required"));
     const request={plan_id:$("#purchase-plan").value,method,accept_terms:true,terms_version:agreedTermsVersion};
-    if($("#delegate-checkout").checked&&!$("#delegate-checkout-label").hidden){
-      const delegate=account.bindings.find(b=>b.id===pairBindingId&&b.state!=='revoked')||activeAgent();
-      if(!delegate)throw new Error(t("pair_check_first"));
-      const authorization=await api('/api/bindings/'+encodeURIComponent(delegate.id)+'/checkout-permission','POST',request);
-      currentOrder=await api('/api/checkout-permissions/'+encodeURIComponent(authorization.permission_id||authorization.order_id)+'/prepare','POST',{});
-      $("#delegate-checkout-status").hidden=false;$("#delegate-checkout-status").textContent=t("delegate_checkout_ready");
-    }else currentOrder=await api('/api/purchase','POST',request);
+    currentOrder=await api('/api/purchase','POST',request);
     resetTerms();orderPolls=0;clearTimeout(orderTimer);renderOrder();orderTimer=setTimeout(()=>checkOrder(true),6000);
   });
   bind("#refresh-reports","click",loadReports);

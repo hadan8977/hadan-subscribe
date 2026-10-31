@@ -350,6 +350,39 @@ def test_mcp_prepare_checkout_returns_png_without_browser_handoff(xd):
     assert len(calls)==1 and not s.entitled(user['id'],'quantgt')
 
 
+def test_mcp_agent_can_start_checkout_after_chat_confirmation(xd):
+    app,s,client,user,key,calls,mode,_=xd;bid,auth=pairing(client)
+    with TestClient(app) as agent:
+        agent._transport.client=('8.8.8.8',54321)
+        agent.headers.update(auth)
+        response=agent.post('/mcp',json={"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"prepare_checkout","arguments":{
+                "plan_id":PLAN['id'],"method":"wechat","accept_terms":True,"terms_version":TERMS_VERSION}}}).json()
+        result=response['result'];assert result.get('isError') is not True
+        value=json.loads(result['content'][0]['text'])
+        assert value['qr_available'] is True and value['checkout_url'] is None
+        assert value['amount_minor']==1000 and value['payment_by']=='owner'
+        assert result['content'][1]['type']=='image' and result['content'][1]['mimeType']=='image/png'
+        assert base64.b64decode(result['content'][1]['data']).startswith(b'\x89PNG')
+        assert s.db.one("SELECT COUNT(*) count FROM checkout_permissions")['count']==1
+    assert len(calls)==1 and not s.entitled(user['id'],'quantgt')
+
+
+def test_http_agent_can_start_checkout_without_web_authorization(xd):
+    app,s,client,user,key,calls,mode,_=xd;bid,auth=pairing(client)
+    with TestClient(app) as agent:
+        agent._transport.client=('8.8.8.8',54321)
+        agent.headers.update(auth)
+        response=agent.post('/api/agent/checkout',json={
+            "plan_id":PLAN['id'],"method":"wechat","accept_terms":True,"terms_version":TERMS_VERSION})
+        assert response.status_code==200,response.text
+        order=response.json()
+        assert order['qr_available'] is True and order['checkout_url'] is None
+        assert order['qr_image'].startswith('data:image/png;base64,')
+        assert agent.get('/api/agent/checkout/qr').content.startswith(b'\x89PNG')
+    assert len(calls)==1 and not s.entitled(user['id'],'quantgt')
+
+
 def test_agent_permission_expires_is_explicit_and_cannot_survive_revocation(xd):
     app,s,client,user,key,calls,*_=xd;bid,auth=pairing(client)
     assert authorize(client,bid,accept_terms=False).status_code==400

@@ -1064,10 +1064,15 @@ def create_app(settings=None):
             },
             {
                 "name": "prepare_checkout",
-                "description": "Prepare the single QR checkout the owner already approved on the Quant website. No plan, amount, method or user arguments are accepted. Returns the amount, expiry and a PNG QR image. Show the image inline to the owner; never open a browser or cloud computer.",
+                "description": "Prepare a QR checkout after the owner explicitly confirms the live plan, price, payment method and terms in chat. Pass plan_id, method, accept_terms=true and terms_version from get_subscription_status. The server fixes the amount; no client amount or user field is accepted. Returns a PNG QR image to show inline. Never open a browser or cloud computer.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "plan_id": {"type": "string"},
+                        "method": {"type": "string", "enum": ["wechat", "alipay"]},
+                        "accept_terms": {"type": "boolean"},
+                        "terms_version": {"type": "string"},
+                    },
                     "additionalProperties": False,
                 },
                 "annotations": {
@@ -1080,7 +1085,7 @@ def create_app(settings=None):
             },
             {
                 "name": "get_checkout_status",
-                "description": "Read the owner-approved checkout status. Poll no faster than every 5 seconds while waiting for payment. paid=true is the only confirmation of payment; this tool never charges.",
+                "description": "Read the active checkout status. Poll no faster than every 5 seconds while waiting for payment. paid=true is the only confirmation of payment; this tool never charges.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1096,7 +1101,7 @@ def create_app(settings=None):
             },
             {
                 "name": "get_checkout_qr",
-                "description": "Return the current owner-approved checkout QR as a PNG image. Use this if the image from prepare_checkout was not displayed. Never send the owner to a cloud browser.",
+                "description": "Return the current checkout QR as a PNG image. Use this if the image from prepare_checkout was not displayed. Never send the owner to a cloud browser.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1296,6 +1301,7 @@ def create_app(settings=None):
                 a = params.get("arguments", {})
                 if name == "get_subscription_status":
                     from .commerce import Commerce
+                    from .terms import TERMS_VERSION
 
                     sub = s.db.one(
                         "SELECT status,expires_at,email_enabled,agent_enabled "
@@ -1309,6 +1315,7 @@ def create_app(settings=None):
                         and sub["expires_at"] <= time.time()
                     ):
                         state = "expired"
+                    options = Commerce(s).options()
                     value = {
                         "subscription": (
                             {
@@ -1321,7 +1328,14 @@ def create_app(settings=None):
                             else {"status": "none", "expires_at": None, "email_enabled": False, "agent_enabled": False}
                         ),
                         "subscribe_url": cfg.base_url.rstrip("/") + "/app?flow=subscribe",
-                        "plans": Commerce(s).options()["plans"],
+                        "plans": options["plans"],
+                        "payment_methods": [
+                            item["id"]
+                            for item in options["methods"]
+                            if item["enabled"] and item["id"] in ("wechat", "alipay")
+                        ],
+                        "terms_version": TERMS_VERSION,
+                        "terms_url": cfg.base_url.rstrip("/") + "/terms",
                         "payment_by": "owner",
                         "automatic_renewal": False,
                     }
@@ -1332,7 +1346,16 @@ def create_app(settings=None):
                 elif name == "prepare_checkout":
                     from .agent_checkout import AgentCheckout
 
-                    return ok_image(AgentCheckout(s).prepare(b))
+                    checkout = AgentCheckout(s)
+                    if a:
+                        return ok_image(
+                            checkout.start(
+                                b,
+                                a,
+                                request.client.host if request.client else "unknown",
+                            )
+                        )
+                    return ok_image(checkout.prepare(b))
                 elif name == "get_checkout_status":
                     from .agent_checkout import AgentCheckout
 
@@ -1588,10 +1611,18 @@ def create_app(settings=None):
     @app.post("/api/agent/checkout")
     async def agent_prepare_checkout(request: Request):
         from .agent_checkout import AgentCheckout
+
         b = agent(request, pending=True)
-        if await payload(request):
-            raise Problem("付款参数由本人授权确定", 400)
-        return await run_in_threadpool(AgentCheckout(s).prepare, b)
+        p = await payload(request)
+        checkout = AgentCheckout(s)
+        if p:
+            return await run_in_threadpool(
+                checkout.start,
+                b,
+                p,
+                request.client.host if request.client else "unknown",
+            )
+        return await run_in_threadpool(checkout.prepare, b)
 
     @app.get("/api/agent/checkout")
     def agent_checkout_status(request: Request):

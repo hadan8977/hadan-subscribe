@@ -59,9 +59,11 @@ Updated 2026-10-30. The public endpoint is `https://quant.example.com/mcp`.
    the site pairing link instead. It is the supported fallback: the agent asks
    for a pairing link, the owner approves once, and the agent stores the device
    credential.
-6. First-time sequence: connect -> call `get_subscription_status` -> send the
-   owner to `subscribe_url` -> after payment, enable Agent delivery -> then
-   `events/subscribe`. Events require an active subscription and Agent delivery.
+6. First-time sequence: connect -> call `get_subscription_status` -> explain
+   the live plan, price, payment method and terms link -> owner confirms in chat
+   -> `prepare_checkout` with the live plan/method/terms -> send the QR image ->
+   after payment, enable Agent delivery -> then `events/subscribe`. Events
+   require an active subscription and Agent delivery.
 7. In a Work chat or dot, ask it to subscribe to Quant report events. ChatGPT
    will call `events/subscribe` with its callback URL and `whsec_` secret.
    Quant verifies the callback before accepting the subscription.
@@ -79,8 +81,9 @@ MCP tools.
 - `get_scan_schedule()` — upcoming scans plus exact check times: at most three
   checks per scan (scan + 10, +20 and +30 minutes). Poll only inside those
   windows; never run a 24/7 ten-minute loop.
-- `prepare_checkout()` — prepares the single QR checkout the owner approved on
-  the website and returns a PNG QR image block
+- `prepare_checkout(plan_id, method, accept_terms, terms_version)` — after the
+  owner confirms the live plan, price, method and terms in chat, prepares the
+  single QR checkout and returns a PNG image block. The server fixes the amount.
 - `get_checkout_status()` — reads that order; `paid=true` is the only payment
   confirmation
 - `get_checkout_qr()` — returns the current QR as a PNG image
@@ -95,16 +98,25 @@ when `list_events()` returns pending events. Email is independent.
 
 ## QR checkout from an agent
 
-The owner must approve the plan, method, current terms and one checkout
-permission in the website. The agent cannot choose or change those values.
-After approval:
+The owner confirms the subscription in chat; there is no separate website
+authorization button. The agent reads the live plan, payment methods and
+`terms_version` from `get_subscription_status`, explains the plan, price, method
+and terms link, and asks for explicit confirmation. It then calls:
 
-1. Call `prepare_checkout` (or `POST /api/agent/checkout` with a device token).
-2. Show the returned PNG QR inline to the owner. Do not open a browser or cloud
+```json
+{"plan_id": "<live plan id>", "method": "wechat", "accept_terms": true, "terms_version": "<live version>"}
+```
+
+with `prepare_checkout` over MCP, or the same JSON with
+`POST /api/agent/checkout` using a device token. The server fixes the amount,
+currency, product and user; client-supplied amounts or arbitrary plans are
+rejected. The order is short-lived and single-use.
+
+1. Show the returned PNG QR inline to the owner. Do not open a browser or cloud
    computer when a QR is available.
-3. If the client cannot render MCP image content, call `get_checkout_qr` (or
+2. If the client cannot render MCP image content, call `get_checkout_qr` (or
    `GET /api/agent/checkout/qr`) and send the PNG as an attachment.
-4. Poll `get_checkout_status` no faster than every 5 seconds. Only `paid=true`
+3. Poll `get_checkout_status` no faster than every 5 seconds. Only `paid=true`
    confirms payment.
 
 The QR has an opaque white background and a white quiet zone so it remains
@@ -120,9 +132,9 @@ handoff.
 - Token: `POST /oauth/token`
 - Revocation: `POST /oauth/revoke`
 
-Scopes are `quant.read`, `quant.ack` and `offline_access`. The owner-approved
-QR helpers use `quant.read`; the owner's single-use website permission remains
-the payment gate. A refresh token is issued only when `offline_access` was
+Scopes are `quant.read`, `quant.ack` and `offline_access`. The QR helpers use
+`quant.read`; the server fixes the plan/amount and the owner's payment remains
+the final gate. A refresh token is issued only when `offline_access` was
 granted, and refresh tokens rotate. The OAuth
 `resource` value is validated against `https://quant.example.com/mcp` (the bare
 origin is accepted for compatibility clients).
@@ -163,7 +175,7 @@ for the full report and attachments.
 ## Diagnostics
 
 Production writes a redacted request log to
-`/var/lib/quant-subscribe/oauth-diagnostics.log`. It records method, path without query,
+`/var/lib/hadan/oauth-diagnostics.log`. It records method, path without query,
 status, User-Agent, Origin, Accept, content type, MCP protocol/method headers
 and auth scheme. DCR diagnostic entries also include selected registration
 metadata (client name, redirect URIs, grants, scope). It never records query

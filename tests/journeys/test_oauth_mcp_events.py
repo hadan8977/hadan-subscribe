@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import time
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -585,6 +586,8 @@ def test_subscription_status_tool_works_before_purchase(journey):
     assert value["subscribe_url"].endswith("/app?flow=subscribe")
     assert isinstance(value["plans"], list)
     assert value["payment_by"] == "owner" and value["automatic_renewal"] is False
+    assert value["terms_version"] and value["terms_url"].endswith("/terms")
+    assert isinstance(value["payment_methods"], list)
     schedule = mcp(
         owner,
         access,
@@ -600,9 +603,14 @@ def test_subscription_status_tool_works_before_purchase(journey):
     assert "recommended_poll_interval_seconds" not in timing
     assert "inbox_polls" not in timing
     assert timing["scans"] and all(
-        len(item["checks_utc"]) == 3
-        and item["checks_utc"] == sorted(item["checks_utc"])
-        and all(check > item["scan_at_utc"] for check in item["checks_utc"])
+        "checks_new_york" in item
+        and "checks_utc" not in item
+        and "checks_asia_shanghai" not in item
+        and len(item["checks_new_york"]) == 3
+        and all(
+            datetime.fromisoformat(check) > datetime.fromisoformat(item["scan_at_new_york"])
+            for check in item["checks_new_york"]
+        )
         for item in timing["scans"]
     )
 

@@ -42,17 +42,17 @@ POST {{BASE_URL}}/mcp
   Tools:
     get_subscription_status()
     get_scan_schedule()
-    prepare_checkout()
+    prepare_checkout(plan_id, method, accept_terms, terms_version)
     get_checkout_status()
     get_checkout_qr()
     list_events(after optional)
     read_content(content_id, version optional)
     read_attachment(attachment_id)
     ack_event(event_id)
-  get_subscription_status is available with a valid credential even before purchase. It returns the subscription state, live plans and the owner-only subscribe_url; it never changes billing or delivery preferences. If the owner needs to buy or renew, send them to subscribe_url and ask them to choose the plan/method, accept the terms, and tick the checkbox allowing this agent to prepare the QR checkout.
-  get_scan_schedule returns upcoming scan times plus an explicit check plan: at most three checks per scan, at scan + 10, +20 and +30 minutes. Poll only inside those listed windows. Do not run a 24/7 every-10-minute loop; between scans there is nothing to fetch. If the runtime only supports a fixed interval, gate each run by check_window_start_utc/check_window_end_utc and skip runs outside the windows. If no pending events, do not notify the owner.
-  prepare_checkout, get_checkout_status and get_checkout_qr only work after the owner approves a single-use QR checkout on the website. They never charge, change the plan or accept terms.
-  read_attachment returns a private base64 embedded resource. No subscription mutation, admin or spending tools are exposed; checkout tools only prepare an owner-approved QR and never charge.
+  get_subscription_status is available with a valid credential even before purchase. It returns the subscription state, live plans, enabled payment_methods, terms_version, terms_url and the owner-only subscribe_url; it never changes billing or delivery preferences. If the owner needs to buy or renew, explain the live plan, price, method and terms link in chat and ask for explicit confirmation. Then call prepare_checkout with plan_id, method, accept_terms=true and terms_version; no website authorization click is required. If the owner prefers the website, send subscribe_url instead.
+  get_scan_schedule returns upcoming scan times plus an explicit check plan: at most three checks per scan, at scan + 10, +20 and +30 minutes. Poll only inside those listed windows. Do not run a 24/7 every-10-minute loop; between scans there is nothing to fetch. If the runtime only supports a fixed interval, gate each run by check_window_start_new_york/check_window_end_new_york and skip runs outside the windows. If no pending events, do not notify the owner.
+  prepare_checkout starts a single-use order only after the owner explicitly confirms the live plan, method and terms in chat. The server fixes the amount and accepts no client amount or user field. get_checkout_status and get_checkout_qr read or render that order. They never charge, change the plan or accept terms on the owner's behalf.
+  read_attachment returns a private base64 embedded resource. No subscription mutation, admin or spending tools are exposed; checkout tools only prepare a confirmed QR and never charge.
 
 MCP EVENTS
 Event name: quant.report.published
@@ -126,8 +126,8 @@ GET /api/agent/status
   expires_at is a UTC Unix timestamp or null. Only the owner's Quant subscription is represented; no email or other subscriber data is returned.
   ready = active binding AND current Quant access AND agent delivery enabled. It does not attest that the client has a scheduler.
 GET /api/agent/schedule
-  Same device credential; OAuth clients use MCP get_scan_schedule. Returns upcoming content scans and exact checks_utc /
-  checks_asia_shanghai: at most three checks per scan, 10 minutes apart, inside each check window. Poll only those times;
+  Same device credential; OAuth clients use MCP get_scan_schedule. Returns upcoming content scans and exact New York check times in checks_new_york:
+  at most three checks per scan, 10 minutes apart, inside each check window. Poll only those times;
   never run a 24/7 every-10-minute loop. No pending event means no notification.
 GET /api/agent/test
 GET /api/agent/test-file
@@ -159,23 +159,27 @@ RECOVERY
 401: stop revoked/invalid credentials. 403: check current access/channel settings, do not bypass them. 429: honor Retry-After or wait at least 60 seconds. Bound retries for read/status failures; reconcile an uncertain mutation instead of blindly repeating it.
 The owner activates/renews/redeems through {{BASE_URL}}/app?flow=subscribe and manages opt-outs through {{BASE_URL}}/app?view=connections. Agent credentials cannot pay, redeem, modify subscriptions, or restore disabled email.
 
-OWNER-APPROVED QR CHECKOUT (MCP OR HTTP)
-The owner must first open the subscribe URL, sign in, choose the plan and payment method, accept the current terms, and tick "Allow <agent> to prepare a QR checkout." That creates a single-use permission for this binding. The agent cannot choose or change the plan, amount, method, payer or period, and cannot accept terms for the owner.
+AGENT-INITIATED QR CHECKOUT (OWNER CONFIRMS IN CHAT)
+The owner does not need to open the website just to authorize checkout. First call get_subscription_status and use only its live plans, payment_methods and terms_version. Explain the plan, price, method and terms_url in chat, and ask the owner to confirm explicitly. After confirmation, call prepare_checkout with exactly:
+  {"plan_id": "<live plan id>", "method": "wechat|alipay", "accept_terms": true, "terms_version": "<live version>"}
+The server fixes the amount, currency, product and user; a client-supplied amount, user or unknown plan is rejected. This creates one short-lived order for this binding; it does not charge anything.
 
 MCP tools:
-  prepare_checkout()
-    No arguments. Prepares the one owner-approved order and returns amount, currency, access_until, expires_at,
-    qr_available and a PNG QR image block. Show the image inline to the owner immediately.
+  prepare_checkout(plan_id, method, accept_terms, terms_version)
+    Starts the confirmed checkout and returns amount, currency, access_until, expires_at, qr_available and a
+    PNG QR image block. Show the image inline to the owner immediately. If the owner already approved a checkout
+    on the website, calling with no arguments uses that legacy permission.
   get_checkout_status()
-    Read the same order. Poll no faster than every 5 seconds. paid=true is the only payment confirmation.
+    Read the active order. Poll no faster than every 5 seconds. paid=true is the only payment confirmation.
   get_checkout_qr()
     Return the current QR as a PNG image if the first image was not displayed.
 
-HTTP fallback:
-  POST /api/agent/checkout  JSON {} only. Returns the same fields plus qr_image (data:image/png;base64,...),
-    qr_download_url and no checkout_url when a QR is ready.
+HTTP device API:
+  POST /api/agent/checkout  Same JSON body as prepare_checkout; JSON {} uses a legacy web-approved permission.
+    Returns the same fields plus qr_image (data:image/png;base64,...), qr_download_url and no checkout_url
+    when a QR is ready.
   GET /api/agent/checkout
-    Same order status. If no order exists yet it returns status=authorized and permission_id; call prepare next.
+    Same order status. If no order exists yet it returns status=authorized and permission_id.
   GET /api/agent/checkout/qr
     PNG bytes for the same order, using the device Bearer credential.
 

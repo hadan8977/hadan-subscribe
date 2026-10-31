@@ -1,4 +1,4 @@
-"""A separate, owner-approved scope for preparing one QR checkout, never spending."""
+"""Agent-initiated or owner-approved QR checkout, never spending."""
 import base64
 import ipaddress
 import json
@@ -51,6 +51,21 @@ class AgentCheckout:
         return {"order_id": identity, "permission_id": identity, "expires_at": now + 1800,
                 "amount_minor": plan["amount_minor"], "currency": "CNY",
                 "access_until": plan["access_until"], "payment_by": "owner"}
+
+    def start(self, binding, payload, payer_ip):
+        """Start a checkout after the owner confirms the live plan in chat.
+
+        This removes the extra website authorization click. The server still
+        fixes the plan, amount and method from its own catalog; the agent can
+        only choose among published options, and the owner must still pay.
+        """
+        allowed = {"plan_id", "method", "accept_terms", "terms_version"}
+        if not isinstance(payload, dict) or not payload or set(payload) - allowed:
+            raise Problem("付款参数无效", 400)
+        with self.s.db.transaction() as db:
+            self.s._limit(db, "agent-checkout:" + binding["id"], 6, 3600)
+        self.authorize(binding["user_id"], binding["id"], payload, payer_ip)
+        return self.prepare(binding)
 
     def _permission(self, binding):
         # Prefer the permission that already produced an order, so a newer
@@ -170,7 +185,7 @@ class AgentCheckout:
                 "qr_download_url": None,
                 "checkout_url": None,
                 "display_hint": None,
-                "next_action": "Call prepare_checkout to create the owner-approved QR order.",
+                "next_action": "Call prepare_checkout with the confirmed live plan to create the QR order.",
                 "payment_by": "owner",
                 "automatic_renewal": False,
             }

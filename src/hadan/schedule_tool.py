@@ -1,9 +1,8 @@
 """Agent-facing view of the source scan schedule.
 
-The scheduler is defined in America/New_York local time. Converting it here
-keeps DST, weekends and holiday schedules correct for agents that poll from a
-different timezone. Agents should check only after the listed scans, not run a
-24/7 interval loop.
+The scheduler is defined in America/New_York local time. All returned times
+use New York time with the correct DST offset. Agents should check only after
+the listed scans, not run a 24/7 interval loop.
 """
 from __future__ import annotations
 
@@ -16,55 +15,49 @@ CONTENT_KINDS = {"official_mail", "picks", "weekly_digest"}
 CHECK_DELAY_SECONDS = 600
 CHECK_INTERVAL_SECONDS = 600
 CHECKS_PER_SCAN = 3
+NY = ZoneInfo("America/New_York")
 
 
-def _checks(at: datetime, cn: ZoneInfo) -> dict:
+def _checks(at: datetime) -> dict:
     checks = [
         at + timedelta(seconds=CHECK_DELAY_SECONDS + index * CHECK_INTERVAL_SECONDS)
         for index in range(CHECKS_PER_SCAN)
     ]
     return {
-        "checks_utc": [item.astimezone(timezone.utc).isoformat() for item in checks],
-        "checks_asia_shanghai": [item.astimezone(cn).isoformat() for item in checks],
-        "check_window_start_utc": checks[0].astimezone(timezone.utc).isoformat(),
-        "check_window_end_utc": checks[-1].astimezone(timezone.utc).isoformat(),
-        "check_window_start_asia_shanghai": checks[0].astimezone(cn).isoformat(),
-        "check_window_end_asia_shanghai": checks[-1].astimezone(cn).isoformat(),
+        "checks_new_york": [item.isoformat() for item in checks],
+        "check_window_start_new_york": checks[0].isoformat(),
+        "check_window_end_new_york": checks[-1].isoformat(),
     }
 
 
 def upcoming_scans(limit: int = 12) -> dict:
     now = datetime.now(timezone.utc)
-    ny = ZoneInfo("America/New_York")
-    cn = ZoneInfo("Asia/Shanghai")
-    today = now.astimezone(ny).date()
+    today = now.astimezone(NY).date()
     scans = []
     for offset in range(0, 10):
         day = today + timedelta(days=offset)
         for hour, minute, kind in schedule_for_date(day):
             if kind not in CONTENT_KINDS:
                 continue
-            at = datetime(day.year, day.month, day.day, hour, minute, tzinfo=ny)
+            at = datetime(day.year, day.month, day.day, hour, minute, tzinfo=NY)
             if at <= now:
                 continue
-            timing = _checks(at, cn)
+            timing = _checks(at)
             scans.append(
                 {
                     "kind": kind,
-                    "scan_at_utc": at.astimezone(timezone.utc).isoformat(),
-                    "scan_at_asia_shanghai": at.astimezone(cn).isoformat(),
-                    "poll_after_utc": timing["checks_utc"][0],
-                    "poll_after_asia_shanghai": timing["checks_asia_shanghai"][0],
+                    "scan_at_new_york": at.isoformat(),
+                    "poll_after_new_york": timing["checks_new_york"][0],
                     **timing,
                 }
             )
         if len(scans) >= limit:
             break
-    scans = sorted(scans, key=lambda item: item["scan_at_utc"])[:limit]
+    scans = scans[:limit]
     return {
-        "generated_at_utc": now.isoformat(),
+        "generated_at_new_york": now.astimezone(NY).isoformat(),
         "timezone": "America/New_York",
-        "timezone_note": "Scan times follow the NYSE calendar and are converted to UTC and Asia/Shanghai.",
+        "timezone_note": "All scan and check times are New York local time, including the DST offset.",
         "polling_policy": {
             "mode": "scan_windows_only",
             "checks_per_scan": CHECKS_PER_SCAN,
@@ -80,7 +73,7 @@ def upcoming_scans(limit: int = 12) -> dict:
             "Do not run a 24/7 every-10-minute loop and do not poll between scans; "
             "there is nothing new to fetch outside the scan windows. "
             "If the scheduler can only repeat at a fixed interval, gate each run by "
-            "check_window_start_utc and check_window_end_utc and skip runs outside those windows. "
+            "check_window_start_new_york and check_window_end_new_york and skip runs outside those windows. "
             "If it cannot gate by time, use MCP Events or email instead of a continuous loop. "
             "No pending events means no notification."
         ),
