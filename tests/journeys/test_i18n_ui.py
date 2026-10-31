@@ -73,7 +73,10 @@ def test_public_pages_are_bilingual_single_product(journey, path, cn, en):
         assert f'<html lang="{lang}" ' in response.text
         text = visible(response.text)
         assert expected in text
-        assert "notify@example.test" in text
+        if path == "/":
+            assert "notify@example.test" not in text
+        else:
+            assert "notify@example.test" in text
         for forbidden in ("Hadan", "Quant GT", "quantgt", "newsletter", "来信"):
             assert forbidden not in text
         assert "fonts.googleapis" not in response.text and "cdn.jsdelivr" not in response.text

@@ -12,7 +12,6 @@
   {% elif oauth_request %}
     <h1>{{t('oauth_title')}}</h1>
     <p>{{t('oauth_intro')}}</p>
-    <p class="fine mail-sender-note" data-mail-sender-notice data-mail-sender="{{mail_sender}}">{{t('mail_sender_notice', email=mail_sender)}}</p>
     <div class="panel oauth-summary">
       <p><span class="muted">{{t('oauth_requesting')}}</span><br><strong>{{client_name}}</strong></p>
       {% if signed_in %}<p><span class="muted">{{t('oauth_signed_in')}}</span><br><strong>{{signed_in.email}}</strong></p>{% endif %}
@@ -46,6 +45,7 @@
         <label for="oauth-code">{{t('code_label')}}</label>
         <input id="oauth-code" name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required>
         <button type="submit" class="button">{{t('verify_continue')}}</button>
+        <p class="mail-hint" data-mail-sender-notice data-mail-sender="{{mail_sender}}">{{t('mail_sender_notice', email=mail_sender)}}</p>
       </form>
       <p id="oauth-status" class="form-status" role="status" aria-live="polite"></p>
       <p class="muted">{{t('code_note')}}</p>
