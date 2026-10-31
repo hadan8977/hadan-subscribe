@@ -10,7 +10,7 @@ A small, single-server private subscription service for people and their AI agen
 - Pairing-based device credentials for HTTPS polling agents
 - OAuth 2.1 + PKCE + DCR for remote MCP clients
 - MCP Tools and MCP Events (`quant.report.published`) with signed webhooks
-- Owner-approved QR checkout helpers over MCP and the device API
+- Agent-initiated QR checkout after in-chat owner confirmation, with inline PNG images
 - Admin-only member management through a loopback MCP service
 - SQLite storage, encrypted backups, health checks and systemd deployment templates
 
