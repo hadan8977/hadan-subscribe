@@ -35,13 +35,25 @@ def test_extra_closure_is_configurable(monkeypatch):
     assert not schedule.is_trading_day(date(2026, 5, 26))
 
 
-def test_month_end_keeps_core_and_adds_15_minute_mail(monkeypatch):
+def test_month_end_has_no_extra_intraday_mail(monkeypatch):
     monkeypatch.delenv("HADAN_SCHEDULE", raising=False)
     plan = schedule.schedule_for_date(date(2026, 6, 30))
-    for minute in range(8 * 60, 20 * 60 + 1, 15):
-        assert (minute // 60, minute % 60, "official_mail") in plan
-    assert (8, 30, "picks") in plan and (12, 40, "daily_admin_status") in plan
+    assert (8, 30, "picks") in plan and (8, 40, "daily_admin_status") in plan
+    assert not any(9 * 60 + 30 <= h * 60 + m < 16 * 60 for h, m, _ in plan)
     assert len(plan) == len(set(plan))
+
+
+def test_trading_and_closed_day_scan_windows(monkeypatch):
+    monkeypatch.delenv("HADAN_SCHEDULE", raising=False)
+    trading = schedule.schedule_for_date(date(2026, 6, 30))
+    closed = schedule.schedule_for_date(date(2026, 7, 3))
+    assert (8, 30, "picks") in trading and (17, 0, "picks") in trading
+    assert (8, 40, "daily_admin_status") in trading
+    assert (8, 50, "weekly_digest") in trading
+    assert not any(9 * 60 + 30 <= h * 60 + m < 16 * 60 for h, m, _ in trading)
+    assert (8, 30, "picks") in closed and (17, 0, "picks") not in closed
+    assert (8, 40, "daily_admin_status") in closed
+    assert (8, 50, "weekly_digest") in closed
 
 
 def test_custom_schedule_replaces_dynamic_plan(monkeypatch):

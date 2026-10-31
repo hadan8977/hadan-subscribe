@@ -70,6 +70,7 @@ def upcoming_scans(limit: int = 12) -> dict:
         "note": (
             "Run list_events only at the listed checks for each scan, at most three checks. "
             "Each check is 10 minutes after the scan, then 10 and 20 minutes later. "
+            "On trading days there are no scheduled source scans between 09:30 and 16:00 New York time. "
             "Do not run a 24/7 every-10-minute loop and do not poll between scans; "
             "there is nothing new to fetch outside the scan windows. "
             "If the scheduler can only repeat at a fixed interval, gate each run by "

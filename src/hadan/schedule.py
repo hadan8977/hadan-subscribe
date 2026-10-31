@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import json
 import os
 import time
@@ -13,22 +12,20 @@ NY = ZoneInfo("America/New_York")
 TRADING = [
     (8, 20, "official_mail"),
     (8, 30, "picks"),
+    (8, 40, "daily_admin_status"),
     (8, 45, "health_site"),
+    (8, 50, "weekly_digest"),
     (9, 0, "picks"),
-    (9, 20, "official_mail"),
-    (9, 50, "weekly_digest"),
-    (12, 0, "official_mail"),
-    (12, 40, "daily_admin_status"),
     (17, 0, "picks"),
     (17, 15, "health_site"),
     (17, 30, "official_mail"),
 ]
 HOLIDAY = [
-    (12, 0, "picks"),
-    (12, 20, "official_mail"),
-    (12, 30, "weekly_digest"),
-    (12, 40, "daily_admin_status"),
-    (18, 0, "weekly_digest"),
+    (8, 20, "official_mail"),
+    (8, 30, "picks"),
+    (8, 40, "daily_admin_status"),
+    (8, 45, "health_site"),
+    (8, 50, "weekly_digest"),
 ]
 
 
@@ -102,11 +99,6 @@ def schedule_for_date(day):
             values.append((int(hour), int(minute), kind))
         return sorted(set(values))
     values = list(TRADING if is_trading_day(day) else HOLIDAY)
-    if day.day >= calendar.monthrange(day.year, day.month)[1] - 1:
-        values.extend(
-            (minute // 60, minute % 60, "official_mail")
-            for minute in range(8 * 60, 20 * 60 + 1, 15)
-        )
     priority = {
         "picks": 0,
         "health_site": 1,

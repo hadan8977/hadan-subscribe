@@ -55,7 +55,7 @@ Agent 侧获取的 Quant 信息必须全英文，包括方案名、价格、日�
 4. 调 `get_subscription_status`；它返回实时套餐、可用支付方式、`terms_version`、`terms_url` 和 `subscribe_url`。Agent 在对话里说明套餐、价格、支付方式和条款链接，请 owner 明确确认。
 5. Agent 调 `prepare_checkout`，传入 `plan_id`、`method`、`accept_terms=true`、`terms_version`（HTTP 客户端用 `POST /api/agent/checkout` 传同样 JSON）。服务端固定金额，不接受客户端金额或任意套餐。返回 PNG 二维码后直接把图片发给 owner；不要打开浏览器或云电脑，也不需要 owner 再去网页点授权按钮。客户端无法显示图片时用 `get_checkout_qr` / `GET /api/agent/checkout/qr` 下载后作为附件发送。
 6. owner 扫码付款后，Agent 用 `get_checkout_status` 查询，`paid=true` 才算完成；轮询间隔不小于 5 秒。付款后确认订阅状态和 Agent delivery，再调 `events/subscribe`（需要 active subscription + agent delivery）。网页 `subscribe_url` 只作为备用手动流程。
-7. 不支持 MCP Events 时，按 `get_scan_schedule` 的 `checks_new_york` 在每次扫描后的检查窗口内查 `list_events()`；每个扫描最多 3 次（扫描后 10/20/30 分钟），不要 24 小时每 10 分钟轮询。若运行时只能固定间隔执行，必须用 `check_window_start_new_york`/`check_window_end_new_york` 过滤，窗口外直接跳过；空列表不通知。
+7. 不支持 MCP Events 时，按 `get_scan_schedule` 的 `checks_new_york` 在每次扫描后的检查窗口内查 `list_events()`；每个扫描最多 3 次（扫描后 10/20/30 分钟），不要 24 小时每 10 分钟轮询。交易日所有源扫描都在 09:30 前或 16:00 后（纽约时间），盘中不扫描；非交易日只在开盘前做一轮。若运行时只能固定间隔执行，必须用 `check_window_start_new_york`/`check_window_end_new_york` 过滤，窗口外直接跳过；空列表不通知。
 
 ### 站点配对（HTTPS API 客户端）
 
