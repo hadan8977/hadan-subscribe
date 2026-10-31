@@ -99,6 +99,14 @@ MCP Tools alone does not wake the model or schedule work. If MCP Events is not
 available, use a scheduler only at the returned check times and notify only
 when `list_events()` returns pending events. Email is independent.
 
+## Email delivery
+
+Quant sends sign-in and report email from the public sender address shown on
+the website. Tell the owner to check spam/junk and allowlist that address; if
+the agent manages mailbox filters, add the sender directly. The live address
+is returned as `mail_sender` by `get_subscription_status` and
+`/api/purchase-options`.
+
 ## QR checkout from an agent
 
 The owner confirms the subscription in chat; there is no separate website
