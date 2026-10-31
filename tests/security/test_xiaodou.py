@@ -92,6 +92,31 @@ def post_notice(client,packet):
     return client.post('/webhooks/xiaodou',content=raw,headers=headers)
 
 
+def test_qr_png_preserves_the_qr_module_grid():
+    import struct
+    import zlib
+    import qrcode
+    from hadan.commerce import qr_png
+
+    value = "https://example.test/pay?order=abc123&token=" + "x" * 80
+    code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=1, border=0)
+    code.add_data(value); code.make(fit=True)
+    matrix = code.get_matrix(); modules = len(matrix)
+    raw = qr_png(value, box_size=10, border=4)
+    pos = 8; idat = b""; width = None
+    while pos < len(raw):
+        length = struct.unpack(">I", raw[pos:pos+4])[0]
+        kind = raw[pos+4:pos+8]; payload = raw[pos+8:pos+8+length]; pos += 12 + length
+        if kind == b"IHDR": width = struct.unpack(">IIBBBBB", payload)[0]
+        if kind == b"IDAT": idat += payload
+    pixels = zlib.decompress(idat); stride = 1 + width * 3
+    for row in range(modules):
+        line = pixels[(4 + row) * 10 * stride + 1:(4 + row + 1) * 10 * stride]
+        for column in range(modules):
+            black = line[(4 + column) * 10 * 3:(4 + column) * 10 * 3 + 3] == b"\x00\x00\x00"
+            assert black is bool(matrix[row][column]), (row, column)
+
+
 @pytest.mark.parametrize('method',['wechat','alipay'])
 def test_qr_purchase_fixed_end_date_and_private_qr(xd,method):
     app,s,client,user,key,calls,mode,snapshots=xd

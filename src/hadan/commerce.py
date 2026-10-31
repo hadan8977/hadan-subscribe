@@ -65,13 +65,12 @@ def qr_png(value: str, *, box_size: int = 10, border: int = 4) -> bytes:
         if 0 <= y < modules:
             source = matrix[y]
             for x in range(-border, modules + border):
-                row.extend(black if 0 <= x < modules and source[x] else white)
+                row.extend((black if 0 <= x < modules and source[x] else white) * box_size)
         else:
-            row.extend(white * (modules + border * 2))
-        scaled = bytes(row) * box_size
+            row.extend(white * box_size * (modules + border * 2))
         for _ in range(box_size):
             rows.append(0)
-            rows.extend(scaled)
+            rows.extend(row)
 
     def chunk(tag: bytes, payload: bytes) -> bytes:
         return (
