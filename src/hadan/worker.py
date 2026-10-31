@@ -387,7 +387,7 @@ class Worker:
                 if s
                 else None
             )
-            if (not pref or pref["email_policy"] == "fallback") and s["agent_enabled"]:
+            if (not pref or pref["email_policy"] == "fallback") and s and s["agent_enabled"]:
                 r = self.db.one(
                     "SELECT state FROM receipts WHERE user_id=? AND event_id=?",
                     (d["user_id"], d["event_id"]),
