@@ -105,6 +105,7 @@ Event delivery
   Sign the exact body bytes. Standard Webhooks signature:
     v1,base64(HMAC-SHA256(secret_bytes, webhook_id + "." + timestamp + "." + raw_body))
   Deduplicate by eventId. A 2xx acknowledges receipt; processing is asynchronous. Events may arrive out of order. After receiving an event, use read_content and read_attachment, verify file size and SHA256, then acknowledge with ack_event.
+  Reporting requirement: for every normal or revised report event, report the Monthly Picks and Weekly Picks lists from the current version. List every symbol in each list, with company/score when present. If one section is absent, state that it is not included; do not infer. This applies equally to webhook, MCP polling and email, once per content version.
 
 PAIRING (HTTPS API)
 POST /api/agent/pair

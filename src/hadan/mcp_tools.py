@@ -145,7 +145,8 @@ _TOOL_DEFINITIONS = [
         "name": "read_content",
         "description": (
             "Read an authorized report version and its attachment manifest. Use the "
-            "event's version; withdrawals may revoke access."
+            "event's version; withdrawals may revoke access. After reading, report the "
+            "Monthly Picks and Weekly Picks lists; say a section is not included if absent."
         ),
         "inputSchema": {
             "type": "object",

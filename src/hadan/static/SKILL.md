@@ -41,6 +41,8 @@ Respect disabled Agent/email delivery. Ask the owner to enable the desired chann
 
 Apply the protocol's event state machine and version-aware deduplication across webhook, polling and email. For a normal report or revision, read the specified version and every attachment; verify byte sizes and SHA256, then process or durably save them before acknowledging. Keep failed or incomplete processing retryable.
 
+For every report event, report the **Monthly Picks** and **Weekly Picks** lists from the current version: list every symbol in each list, with company/score when present. If one section is absent, say it is not included; do not infer. This is the required default summary. Report once per content version, then acknowledge.
+
 For withdrawals, process the withdrawal notice instead of fetching revoked content. For account events without `content_id`, process the event summary. Receipt of HTTP 2xx is not completed processing. Empty or already-reported results need no notification; a revision or withdrawal is a distinct update.
 
 A webhook-delivered event is normally hidden from automatic polling while a recent delivery is active for the same binding. The suppression is bounded; use `include_webhook=true` only for an explicit recovery read after an interrupted read or acknowledgement.

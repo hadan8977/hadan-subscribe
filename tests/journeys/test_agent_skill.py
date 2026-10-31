@@ -294,3 +294,22 @@ def test_loopback_http_skill_pair_local_otp_downloads_and_mcp_receipt(tmp_path):
         thread.join(timeout=10)
         sock.close()
         assert not thread.is_alive(), "Owned loopback server did not stop"
+
+
+def test_agent_guidance_requires_monthly_and_weekly_pick_lists(journey):
+    client = journey.client()
+    skill = client.get("/skill.md").text
+    protocol = client.get("/agent/instructions").text
+    assert "Monthly Picks" in skill and "Weekly Picks" in skill
+    assert "Monthly Picks" in protocol and "Weekly Picks" in protocol
+    discovery = client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}},
+    ).json()["result"]["instructions"]
+    assert "Monthly Picks" in discovery and "Weekly Picks" in discovery
+    tools = client.post(
+        "/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+    ).json()["result"]["tools"]
+    read_content = next(tool for tool in tools if tool["name"] == "read_content")
+    assert "Monthly Picks" in read_content["description"]
+    assert "Weekly Picks" in read_content["description"]

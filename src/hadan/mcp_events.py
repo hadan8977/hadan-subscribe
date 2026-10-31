@@ -315,7 +315,9 @@ class MCPEvents:
                 "verify them, then acknowledge; withdrawals and account notices follow "
                 "the protocol's separate branches. Checkout requires the owner's "
                 "explicit confirmation of the live plan, price, method and terms; show "
-                "its QR directly. Tools alone do not provide background delivery."
+                "its QR directly. For every report event, report the Monthly Picks and "
+                "Weekly Picks lists from that version; state a section as not included "
+                "if absent. Tools alone do not provide background delivery."
             ),
             "ttlMs": 3600000,
             "cacheScope": "public",
