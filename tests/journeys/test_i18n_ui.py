@@ -190,11 +190,13 @@ def test_terms_page_uses_configured_support_contact(journey):
     assert "mailto:support@quant.example" in page.text
 
 
-def test_homepage_and_login_expose_live_price_targets(journey, monkeypatch):
+def test_homepage_hides_price_while_login_keeps_live_quote(journey, monkeypatch):
     client = journey.client()
-    home = client.get("/?lang=en")
-    assert home.status_code == 200
-    assert 'data-live-price' in home.text
+    for lang in ("zh-CN", "en"):
+        home = client.get(f"/?lang={lang}")
+        assert home.status_code == 200
+        assert 'data-live-price' not in home.text
+        assert 'landing-price' not in home.text
     app_page = client.get("/app?lang=en")
     assert app_page.status_code == 200
     assert 'id="login-price"' in app_page.text
