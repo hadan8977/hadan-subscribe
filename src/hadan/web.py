@@ -1485,6 +1485,67 @@ def create_app(settings=None):
             return mcp_tool_error(identifier, exc)
         return {"jsonrpc": "2.0", "id": identifier, "result": result}
 
+    @app.get("/api/admin/members")
+    def admin_members(request: Request, q: str = "", status: str = "all", limit: int = 100):
+        from .admin_members import list_members
+
+        user(request, admin=True)
+        return list_members(s, q, status, limit)
+
+    @app.post("/api/admin/members/preview")
+    async def admin_member_preview(request: Request):
+        from .admin_members import preview_add, preview_extend, preview_remove
+
+        u = user(request, write=True, admin=True)
+        p = await payload(request)
+        action = p.get("action")
+        if action == "add":
+            return preview_add(s, p.get("email"), p.get("days"), p.get("until"), p.get("email_consent", False), p.get("note"))
+        if action == "extend":
+            return preview_extend(s, p.get("email"), p.get("days"), p.get("until"))
+        if action == "remove":
+            from .security import email_address
+            try:
+                target = email_address(p.get("email"))
+            except ValueError:
+                raise Problem("邮箱格式无效", 400) from None
+            if target == u["email"].lower():
+                raise Problem("不能移除当前管理员账号", 400)
+            return preview_remove(s, target)
+        raise Problem("未知成员操作", 400)
+
+    @app.post("/api/admin/members")
+    async def admin_member_write(request: Request):
+        from .admin_members import add, extend, remove
+
+        u = user(request, write=True, admin=True)
+        p = await payload(request)
+        action, email = p.get("action"), p.get("email")
+        if p.get("confirm") is not True:
+            raise Problem("请先预览并确认操作", 400)
+        actor = "admin:" + u["id"]
+        if action == "add":
+            return await run_in_threadpool(
+                add, s, email, p.get("days"), p.get("until"),
+                p.get("email_consent", False), p.get("note"), actor,
+            )
+        if action == "extend":
+            return await run_in_threadpool(
+                extend, s, email, p.get("days"), p.get("until"), actor
+            )
+        if action == "remove":
+            from .security import email_address
+            try:
+                normalized = email_address(email)
+            except ValueError:
+                raise Problem("邮箱格式无效", 400) from None
+            if normalized == u["email"].lower():
+                raise Problem("不能移除当前管理员账号", 400)
+            if p.get("confirm_email") != normalized:
+                raise Problem("确认邮箱与目标邮箱不一致", 400)
+            return await run_in_threadpool(remove, s, normalized, actor)
+        raise Problem("未知成员操作", 400)
+
     @app.get("/api/admin/status")
     def admin_status(request: Request):
         from .commerce import Commerce

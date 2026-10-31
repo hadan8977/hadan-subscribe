@@ -5,7 +5,7 @@
   const bundle = JSON.parse($("#quant-i18n")?.textContent || '{"strings":{},"errors":{}}');
   const QUANT = "quantgt";
   let lang = document.documentElement.lang === "en" ? "en" : "zh-CN";
-  let csrf = "", account = null, adminData = null, toastTimer;
+  let csrf = "", account = null, adminData = null, memberData = null, memberAddRequest = null, adminEmail = "", toastTimer;
   const entry = new URLSearchParams(location.search);
   const pairHome = $("#pair-form")?.parentElement;
   let onboarding = entry.get("flow") === "subscribe" || entry.has("pair");
@@ -121,7 +121,7 @@
     if (codeRequested && $("#request-code")) $("#request-code").textContent = t("resend_code");
     for (const selector of ["#login-status", "#redeem-status"]) { const el = $(selector); if (el?.dataset.statusKey) status(el, t(el.dataset.statusKey), el.classList.contains("error")); else if (el?.textContent) status(el, localMessage(el.textContent), el.classList.contains("error")); }
     if (account && $("#account")) renderAccount();
-    if (adminData) renderAdmin();
+    if (adminData) { renderAdmin(); if(memberData){ renderMemberStats(); renderMembers(); $("#admin-identity").textContent=t("admin_identity",{email:adminEmail}); } }
     renderPurchase(); renderOrder(); renderOnboarding(); renderLandingPrice();
     if ($("#agent-prompt-text")) $("#agent-prompt-text").value=t("agent_prompt", {url:location.origin});
     if ($("#guide-url")) $("#guide-url").value=t("agent_prompt", {url:location.origin});
@@ -463,11 +463,103 @@
     const jobNames={"source:picks":"job_picks","source:weekly_digest":"job_digest","source:official_mail":"job_mail","source:health_site":"job_site","source:daily_admin_status":"job_admin","source:activate_parser":"job_parser_activate",login_mail:"job_login",account_mail:"job_account",deliver:"job_delivery",purchase_reconcile:"job_payment_check",webhook_test:"job_webhook_test",billing_cancel:"job_cancel_billing",billing_reconcile:"job_payment_check",diagnose:"job_diagnose",propose_parser:"job_parser_proposal",admin_summary:"job_admin"};
     $("#job-status").innerHTML=(data.jobs.length?data.jobs.map(j=>'<p>'+esc(jobNames[j.kind]?t(jobNames[j.kind]):j.kind)+' · '+esc(stateName(j.state))+' <strong>'+j.count+'</strong></p>').join(""):'<p class="muted">'+esc(t("no_jobs"))+'</p>')+((data.deliveries||[]).length?'<p><strong>'+esc(t("delivery_counts"))+'</strong></p>'+data.deliveries.map(d=>'<p>'+esc(bundle.strings[lang]?.["delivery_state_"+d.state]||stateName(d.state))+' <strong>'+d.count+'</strong></p>').join(""):'');
     $("#incident-list").innerHTML=data.incidents.length?data.incidents.map(i=>'<div class="entry"><div><span class="badge">'+esc(stateName(i.state))+'</span><p>'+esc(i.summary)+'</p><small class="muted">'+esc(t("occurrences",{count:i.count}))+'</small>'+(i.diagnosis?'<details><summary>'+esc(t("diagnosis"))+'</summary><pre>'+esc(i.diagnosis)+'</pre></details>':'')+'</div></div>').join(""):'<p class="muted">'+esc(t("no_incidents"))+'</p>';
-    $("#members").innerHTML=data.members.map(m=>'<tr><td>'+esc(m.email)+'</td><td>'+esc(m.name)+'</td><td>'+esc(date(m.expires_at))+'</td><td>'+esc(t(m.email_enabled?'on':'off'))+'</td><td>'+esc(t(m.agent_enabled?'on':'off'))+'</td></tr>').join("");
     if($("#admin-orders"))$("#admin-orders").innerHTML=(data.orders||[]).length?'<div class="table-scroll"><table><thead><tr><th>'+esc(t("order_id"))+'</th><th>'+esc(t("method_label"))+'</th><th>'+esc(t("amount"))+'</th><th>'+esc(t("status_label"))+'</th></tr></thead><tbody>'+data.orders.map(o=>'<tr><td>'+esc(o.id)+'<br><span class="muted">'+esc(date(o.created_at,true))+'</span></td><td>'+esc(t("method_"+o.method))+'</td><td>'+esc(money(o.amount_minor,o.currency))+'</td><td>'+esc(bundle.strings[lang]?.["payment_state_"+o.status]||o.status)+'</td></tr>').join("")+'</tbody></table></div>':'<p class="muted">'+esc(t("no_orders"))+'</p>';
     $("#admin-recent").innerHTML=data.recent.map(e=>'<article class="entry"><div><h3>'+esc(e.summary.split("\n")[0])+'</h3><p class="muted">'+esc(date(e.created_at))+(e.withdrawn?' · '+esc(t("withdrawn")):'')+'</p></div><div class="entry-actions">'+(e.content_id&&!e.withdrawn?'<button class="quiet danger" data-withdraw="'+esc(e.content_id)+'">'+esc(t("withdraw_button"))+'</button>':'')+'<button class="quiet" data-replay="'+esc(e.id)+'">'+esc(t("replay_button"))+'</button></div></article>').join("");
   }
-  async function loadAdmin(){const me=await api("/api/me");csrf=me.csrf;adminData=await api("/api/admin/status");renderAdmin();}
+  function memberStatusLabel(value) { return t("member_status_" + (value || "none")); }
+  function renderMemberStats() {
+    if (!memberData || !$("#member-stats")) return;
+    const c = memberData.counts || {};
+    $("#member-stats").innerHTML = [
+      ["member_total_users", c.users],
+      ["member_active", c.active],
+      ["member_expiring", c.expiring_7d],
+      ["member_email_on", c.email_enabled],
+      ["member_agent_on", c.agent_enabled],
+    ].map(([key, value]) => '<div class="stat"><small>'+esc(t(key))+'</small><strong>'+esc(String(value ?? 0))+'</strong></div>').join("");
+  }
+  function renderMembers() {
+    if (!memberData || !$("#member-rows")) return;
+    const rows = memberData.members || [];
+    $("#member-rows").innerHTML = rows.length ? rows.map((m) =>
+      '<tr><td>'+esc(m.email)+'</td><td><span class="badge">'+esc(memberStatusLabel(m.status))+'</span></td><td>'+esc(m.expires_at ? date(m.expires_at) : "—")+'</td><td>'+esc(t(m.email_enabled?'on':'off'))+'</td><td>'+esc(t(m.agent_enabled?'on':'off'))+'</td><td class="entry-actions">'
+      +(m.subscription_id ? '<button class="quiet" type="button" data-member-extend="'+esc(m.email)+'">'+esc(t("member_extend"))+'</button><button class="quiet danger" type="button" data-member-remove="'+esc(m.email)+'">'+esc(t("member_remove"))+'</button>' : '')
+      +'</td></tr>'
+    ).join("") : '<tr><td colspan="6" class="muted">'+esc(t("member_no_rows"))+'</td></tr>';
+  }
+  async function loadMembers() {
+    if (!$("#member-admin")) return;
+    const q = $("#member-search")?.value.trim() || "";
+    const state = $("#member-status-filter")?.value || "all";
+    memberData = await api("/api/admin/members?" + new URLSearchParams({q, status:state, limit:"200"}));
+    renderMemberStats(); renderMembers();
+  }
+  function memberFormPayload() {
+    const email = $("#member-email").value.trim();
+    const custom = $("#member-days").value === "custom";
+    const payload = {action:"add", email, email_consent:!!$("#member-email-consent").checked, note:$("#member-note").value.trim()};
+    if (custom) {
+      const day = $("#member-until").value;
+      if (!day) throw new Error(t("member_until"));
+      payload.until = day + "T23:59:59+08:00";
+    } else {
+      payload.days = Number($("#member-days").value);
+    }
+    return payload;
+  }
+  function resetMemberAdd() {
+    memberAddRequest = null;
+    $("#member-add-preview").hidden = true;
+    $("#member-add-confirm").hidden = true;
+    $("#member-add-preview").innerHTML = "";
+    $("#member-add-status").textContent = "";
+  }
+  async function previewMemberAdd() {
+    const request = memberFormPayload();
+    const preview = await api("/api/admin/members/preview", "POST", request);
+    memberAddRequest = request;
+    $("#member-add-preview").hidden = false;
+    $("#member-add-preview").innerHTML = '<div class="entry"><div><h3>'+esc(preview.email)+'</h3><p>'+esc(t("member_preview_expiry",{date:date(preview.expires_at)}))+'</p><p>'+esc(t("member_preview_email",{value:t(preview.email_enabled?"on":"off")}))+'</p></div></div>';
+    $("#member-add-confirm").hidden = false;
+    status($("#member-add-status"), t("member_preview"), false);
+  }
+  async function commitMemberAdd() {
+    if (!memberAddRequest) return;
+    const current = memberFormPayload();
+    if (JSON.stringify(current) !== JSON.stringify(memberAddRequest)) {
+      throw new Error(t("member_preview_stale"));
+    }
+    await api("/api/admin/members", "POST", {...memberAddRequest, confirm:true});
+    resetMemberAdd();
+    $("#member-add-form").reset();
+    $("#member-until-wrap").hidden = true;
+    await loadMembers();
+    toast(t("member_added"));
+  }
+  async function extendMember(email) {
+    const value = prompt(t("member_extend_prompt"), "30");
+    if (value === null) return;
+    const days = Number(value);
+    const preview = await api("/api/admin/members/preview", "POST", {action:"extend", email, days});
+    if (!confirm(t("member_extend_confirm",{email, date:date(preview.expires_at)}))) return;
+    await api("/api/admin/members", "POST", {action:"extend", email, days, confirm:true});
+    await loadMembers();
+    toast(t("member_extended"));
+  }
+  async function removeMember(email) {
+    const typed = prompt(t("member_remove_prompt"), "");
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== email.toLowerCase()) {
+      toast(t("member_confirm_email_mismatch"), true);
+      return;
+    }
+    const preview = await api("/api/admin/members/preview", "POST", {action:"remove", email});
+    if (!confirm(t("member_remove_confirm",{email, effects:(preview.effects||[]).join("; ")}))) return;
+    await api("/api/admin/members", "POST", {action:"remove", email, confirm_email:typed.trim(), confirm:true});
+    await loadMembers();
+    toast(t("member_removed"));
+  }
+  async function loadAdmin(){const me=await api("/api/me");csrf=me.csrf;adminEmail=me.user.email;adminData=await api("/api/admin/status");$("#admin-identity").textContent=t("admin_identity",{email:adminEmail});renderAdmin();await loadMembers();}
   document.addEventListener("change",async(event)=>{
     const el=event.target.closest("[data-pref]");if(!el)return;el.disabled=true;
     try{const value=el.type==='checkbox'?el.checked:el.value;await api('/api/subscriptions/'+encodeURIComponent(el.dataset.sid),'PATCH',{[el.dataset.pref]:value});const sub=subscription();if(sub)sub[el.dataset.pref]=value;toast(t("preferences_saved"));}
@@ -618,6 +710,18 @@
   });
   bind("#refresh-reports","click",loadReports);
   bind("#refresh-admin","click",loadAdmin);
+  bind("#refresh-members","click",loadMembers);
+  bind("#member-search-button","click",loadMembers);
+  bind("#member-status-filter","change",loadMembers);
+  bind("#member-days","change",()=>{$("#member-until-wrap").hidden=$("#member-days").value!=="custom";});
+  bind("#member-add-form","submit",previewMemberAdd);
+  bind("#member-add-confirm","click",commitMemberAdd);
+  document.addEventListener("click",async(event)=>{
+    const extend=event.target.closest("[data-member-extend]");
+    if(extend){try{await extendMember(extend.dataset.memberExtend);}catch(error){toast(error.message,true);}return;}
+    const remove=event.target.closest("[data-member-remove]");
+    if(remove){try{await removeMember(remove.dataset.memberRemove);}catch(error){toast(error.message,true);}}
+  });
   bind("#job-form","submit",async()=>{await api('/api/admin/jobs','POST',{kind:$("#job-kind").value});await loadAdmin();toast(t("job_queued"));});
   bind("#publish-form","submit",async()=>{const selected=[...$("#files").files];if(selected.length>12||selected.reduce((sum,file)=>sum+file.size,0)>17*1024*1024)throw new Error(t("file_limit"));const files=await Promise.all(selected.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error(t("file_read_error")));reader.onload=()=>resolve({name:file.name,base64:String(reader.result).split(',')[1]});reader.readAsDataURL(file);})));const result=await api('/api/admin/publish','POST',{product_id:$("#publish-product").value,source_key:$("#source-key").value||undefined,title:$("#title").value,body:$("#body").value,changes:$("#changes").value,files});status($("#publish-result"),t("published",{number:result.version}));await loadAdmin();toast(t("published",{number:result.version}));});
   if($("#guide-url"))$("#guide-url").value=t("agent_prompt",{url:location.origin});
