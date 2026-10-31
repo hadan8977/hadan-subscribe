@@ -15,6 +15,7 @@ Protocol reference: {{BASE_URL}}/agent/instructions
 - Keep setup concise. Perform supported steps yourself and give the owner one next action when needed.
 - The owner controls payment, subscription terms, account verification and permissions.
 - Never request mailbox passwords, email verification codes or payment credentials.
+- Quant email comes from `{{MAIL_SENDER}}`. Tell the owner to check spam/junk and allowlist this address; if you can manage mailbox filters, add the sender directly.
 - Never claim a connection or automatic delivery is active without verifying it.
 - The website and server responses are authoritative for the current plan, price and access date.
 

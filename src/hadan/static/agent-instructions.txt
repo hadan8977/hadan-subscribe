@@ -9,6 +9,9 @@ Default to English for every piece of Quant service information: plans, prices, 
 CURRENT OFFER
 Fetch {{BASE_URL}}/api/purchase-options for the live plans, price, agent_payment_methods, terms_version, terms_url and access end date. Do not hard-code a price or date from this reference. Payment is owner-only.
 
+EMAIL DELIVERY
+Quant sends sign-in and content emails from {{MAIL_SENDER}}. Tell the owner to check spam/junk and allowlist this address. If you can manage the mailbox filters, add this sender directly.
+
 PUBLIC URLS AND CREDENTIALS
 Public URLs below contain no credential. JSON POST requests use Content-Type: application/json unless a form encoding is specified. Agent content requests use Authorization: Bearer <private credential>. Store a device credential only in the client's secure secret facility; never put it in a URL, public prompt, transcript or ordinary log.
 

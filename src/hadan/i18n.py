@@ -44,6 +44,7 @@ COPY = {
     "code_label": ("6 位验证码", "6-digit code"),
     "verify_continue": ("验证并继续", "Verify and continue"),
     "code_note": ("10 分钟内有效。重发后请使用最新验证码。", "Valid for 10 minutes. After resending, use the latest code."),
+    "mail_sender_notice": ("订阅与登录邮件由 Quant 发出，发件地址：{email}。若未收到，请检查垃圾邮件或广告邮件，并将该地址加入白名单；如由 Agent 管理邮箱，可让 Agent 直接加入白名单。", "Subscription and sign-in emails are sent by Quant from {email}. If they are missing, check spam or junk and allowlist this address; if an agent manages the mailbox, ask it to allowlist the sender directly."),
     "change_email": ("更换邮箱", "Use another email"),
     "code_sent": ("验证码已发送。", "Code sent."),
     "resend_in": ("{seconds} 秒后可重发", "Resend in {seconds}s"),

@@ -60,6 +60,7 @@ def create_app(settings=None):
     root = Path(__file__).parent
     app.mount("/static", StaticFiles(directory=root / "static"), name="static")
     templates = Jinja2Templates(directory=root / "templates", context_processors=[template_context])
+    templates.env.globals["mail_sender"] = cfg.mail_sender
 
     @app.exception_handler(Problem)
     async def problem_handler(request, exc):
@@ -705,7 +706,8 @@ def create_app(settings=None):
         return Response(
             (root / "static" / "AGENT_PROMPT.md")
             .read_text()
-            .replace("{{BASE_URL}}", cfg.base_url),
+            .replace("{{BASE_URL}}", cfg.base_url)
+            .replace("{{MAIL_SENDER}}", cfg.mail_sender),
             media_type="text/markdown",
             headers={"Cache-Control": "no-store"},
         )
@@ -715,14 +717,15 @@ def create_app(settings=None):
         return Response(
             (root / "static" / "agent-instructions.txt")
             .read_text()
-            .replace("{{BASE_URL}}", cfg.base_url),
+            .replace("{{BASE_URL}}", cfg.base_url)
+            .replace("{{MAIL_SENDER}}", cfg.mail_sender),
             media_type="text/plain",
         )
 
     @app.get("/skill.md")
     def agent_skill():
         return Response(
-            (root / "static" / "SKILL.md").read_text().replace("{{BASE_URL}}", cfg.base_url),
+            (root / "static" / "SKILL.md").read_text().replace("{{BASE_URL}}", cfg.base_url).replace("{{MAIL_SENDER}}", cfg.mail_sender),
             media_type="text/markdown",
         )
 
@@ -1372,6 +1375,7 @@ def create_app(settings=None):
                         ],
                         "terms_version": TERMS_VERSION,
                         "terms_url": cfg.base_url.rstrip("/") + "/terms",
+                        "mail_sender": cfg.mail_sender,
                         "payment_by": "owner",
                         "automatic_renewal": False,
                     }
@@ -1593,6 +1597,7 @@ def create_app(settings=None):
             **options,
             "terms_version": TERMS_VERSION,
             "terms_url": cfg.base_url.rstrip("/") + "/terms",
+            "mail_sender": cfg.mail_sender,
             "agent_payment_methods": [
                 item["id"]
                 for item in options["methods"]

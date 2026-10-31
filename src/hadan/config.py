@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import re
+from email.utils import parseaddr
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,6 +36,9 @@ class Settings:
     mail_backend: str = field(default_factory=lambda: os.getenv("MAIL_BACKEND", "file"))
     mail_from: str = field(
         default_factory=lambda: os.getenv("MAIL_FROM", "Quant <notify@example.invalid>")
+    )
+    mail_sender: str = field(
+        default_factory=lambda: os.getenv("MAIL_SENDER", "").strip()
     )
     mail_reply_to: str = field(default_factory=lambda: os.getenv("MAIL_REPLY_TO", ""))
     smtp_host: str = field(default_factory=lambda: os.getenv("SMTP_HOST", ""))
@@ -89,6 +93,10 @@ class Settings:
     source_timeout: int = 240
     ops_timeout: int = 270
     max_attempts: int = 5
+
+    def __post_init__(self):
+        if not self.mail_sender:
+            self.mail_sender = parseaddr(self.mail_from)[1]
 
     @property
     def db_path(self) -> Path:
@@ -152,6 +160,12 @@ class Settings:
                 errors.append("MAIL_FROM must be a verified sender address")
             if "\n" in self.mail_reply_to or "\r" in self.mail_reply_to:
                 errors.append("MAIL_REPLY_TO must be a single mailbox")
+            if (
+                "\n" in self.mail_sender
+                or "\r" in self.mail_sender
+                or "@" not in self.mail_sender
+            ):
+                errors.append("MAIL_SENDER must be a single email address")
         if self.production and self.mail_backend == "smtp":
             if not (self.ses_feedback_enabled or self.directmail_feedback_enabled):
                 errors.append(

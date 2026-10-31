@@ -85,6 +85,7 @@
     document.cookie = "quant_lang=" + lang + "; Path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
     if (writeURL) { const url = new URL(location.href); url.searchParams.set("lang", lang); history.replaceState(null, "", url.pathname + url.search + url.hash); }
     document.querySelectorAll("[data-i18n]").forEach((el) => { if (el.dataset.i18n) el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-mail-sender-notice]").forEach((el) => { el.textContent = t("mail_sender_notice", {email: el.dataset.mailSender || ""}); });
     for (const attribute of ["placeholder", "aria-label", "content", "alt"]) document.querySelectorAll("[data-i18n-" + attribute + "]").forEach((el) => el.setAttribute(attribute, t(el.getAttribute("data-i18n-" + attribute))));
     document.querySelectorAll("[data-language]").forEach((a) => { a.toggleAttribute("aria-current", a.dataset.language === lang); if (a.dataset.language === lang) a.setAttribute("aria-current", "true"); const url = new URL(location.href); url.searchParams.set("lang", a.dataset.language); a.href = url.pathname + url.search + url.hash; });
     document.querySelectorAll("[data-message-original]").forEach((el) => { el.textContent = localMessage(el.dataset.messageOriginal) || t("saved_heading"); });

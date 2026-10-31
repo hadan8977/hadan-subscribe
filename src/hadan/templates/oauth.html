@@ -12,6 +12,7 @@
   {% elif oauth_request %}
     <h1>{{t('oauth_title')}}</h1>
     <p>{{t('oauth_intro')}}</p>
+    <p class="fine mail-sender-note" data-mail-sender-notice data-mail-sender="{{mail_sender}}">{{t('mail_sender_notice', email=mail_sender)}}</p>
     <div class="panel oauth-summary">
       <p><span class="muted">{{t('oauth_requesting')}}</span><br><strong>{{client_name}}</strong></p>
       {% if signed_in %}<p><span class="muted">{{t('oauth_signed_in')}}</span><br><strong>{{signed_in.email}}</strong></p>{% endif %}

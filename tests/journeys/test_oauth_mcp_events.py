@@ -651,6 +651,7 @@ def test_subscription_status_tool_works_before_purchase(journey):
     assert isinstance(value["plans"], list)
     assert value["payment_by"] == "owner" and value["automatic_renewal"] is False
     assert value["terms_version"] and value["terms_url"].endswith("/terms")
+    assert value["mail_sender"] == "notify@example.test"
     assert isinstance(value["payment_methods"], list)
     schedule = mcp(
         owner,
