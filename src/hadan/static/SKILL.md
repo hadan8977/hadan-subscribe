@@ -39,9 +39,9 @@ If access is missing or expired, use the `get_subscription_status` MCP tool when
 
 ### MCP OAuth (ChatGPT, Grok, Cursor and compatible clients)
 
-If the runtime supports remote MCP connectors, use `{{BASE_URL}}/mcp` with the OAuth discovery documents advertised by the service. The owner completes email verification and consent in the browser. Do not ask for or paste a token. Server-side OAuth storage belongs to the platform; the model must not receive a long-lived secret.
+If the runtime supports remote MCP connectors, use `{{BASE_URL}}/mcp` with the OAuth discovery documents advertised by the service. The owner verifies their email in the browser; on a first connection the authorization completes automatically, with no separate consent click. Replacing an existing active connection still asks for confirmation. Do not ask for or paste a token. Server-side OAuth storage belongs to the platform; the model must not receive a long-lived secret.
 
-If the platform cannot display the OAuth authorization card (for example it reports `no_auth_link`), do not claim the connector is connected. Fall back immediately to the site pairing flow below; it produces the same scoped credential and requires only one owner approval.
+If the platform cannot display the OAuth authorization card (for example it reports `no_auth_link`), do not claim the connector is connected. Fall back immediately to the site pairing flow below; it produces the same scoped credential and completes automatically after the owner verifies their email on a first connection.
 
 ### Pairing (HTTPS API clients)
 
@@ -49,7 +49,7 @@ Use pairing only when the runtime can store a credential securely.
 
 1. Create a pairing with the protocol reference and show the owner the verification link.
 2. Store `device_secret` only in the approved secure credential store.
-3. The owner verifies their email and approves the agent.
+3. The owner verifies their email; on a first connection the pairing completes automatically. Replacing an existing active connection still asks for confirmation.
 4. Resume the connection test after approval: read the test body, download the test file, then complete the test.
 5. Verify the server-side status before reporting success.
 

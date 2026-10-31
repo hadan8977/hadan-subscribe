@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import time
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
@@ -15,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from hadan.mcp_events import CallbackError, _secret_key, _signature, validate_callback_url, verify_callback
+from hadan.worker import Worker
 
 
 def b64url(data: bytes) -> str:
@@ -101,6 +103,16 @@ def mcp(client, access, method, params=None, identifier=1):
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def fresh_otp(journey, email):
+    client = journey.client()
+    assert client.post("/api/auth/request", json={"email": email}).status_code == 200
+    assert Worker(journey.service).run_once()
+    messages = journey.messages(recipient=email.lower().strip(), login=True)
+    assert messages
+    body = messages[-1].get_body(preferencelist=("plain",)).get_content()
+    return client, re.search(r"验证码是 (\d{6})", body).group(1)
 
 
 def test_oauth_metadata_and_anonymous_mcp_discovery(journey):
@@ -229,7 +241,7 @@ def test_oauth_code_pkce_refresh_and_revoke(journey, monkeypatch):
     verifier, challenge = pkce()
     request_id = start_authorize(client, client_info["client_id"], redirect, challenge)
     # The consent page is only available to the signed-in owner.
-    page = client.get("/oauth/authorize", params={"request_id": request_id})
+    page = client.get("/oauth/authorize", params={"request_id": request_id, "manual": "1"})
     assert page.status_code == 200
     assert "oauth-decision-form" in page.text
     location = approve(client, request_id)
@@ -569,6 +581,58 @@ def test_mcp_accepts_chatgpt_origin_and_callback_query(journey, monkeypatch):
     assert response.json()["result"]["_meta"]["mcp/www_authenticate"]
     monkeypatch.setattr("hadan.mcp_events._public_host", lambda host, port: None)
     assert validate_callback_url("https://chatgpt.com/callback?subscription=abc") == ("chatgpt.com", 443)
+
+
+def test_signed_in_first_oauth_get_completes_without_consent_click(journey):
+    client = journey.login("auto-signed-in@example.test")
+    redirect = "https://chatgpt.com/connector/oauth/auto-signed-in"
+    info = register(client, redirect)
+    verifier, challenge = pkce()
+    request_id = start_authorize(client, info["client_id"], redirect, challenge)
+    response = client.get(
+        "/oauth/authorize",
+        params={"request_id": request_id},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    tokens = token(client, info["client_id"], redirect, query["code"][0], verifier)
+    assert tokens["access_token"]
+
+
+def test_email_verification_completes_first_oauth_connection_without_consent_click(journey):
+    client, code = fresh_otp(journey, "auto-oauth@example.test")
+    redirect = "https://chatgpt.com/connector/oauth/auto-first"
+    info = register(client, redirect)
+    verifier, challenge = pkce()
+    request_id = start_authorize(client, info["client_id"], redirect, challenge)
+    verified = client.post(
+        "/api/auth/verify",
+        json={"email": "auto-oauth@example.test", "code": code, "oauth_request_id": request_id},
+    )
+    assert verified.status_code == 200, verified.text
+    target = verified.json()["oauth_redirect"]
+    location = parse_qs(urlsplit(target).query)
+    assert location["state"] == ["state-123"]
+    tokens = token(client, info["client_id"], redirect, location["code"][0], verifier)
+    assert tokens["access_token"]
+
+
+def test_email_verification_completes_first_pairing_without_approval_click(journey):
+    device = journey.client()
+    pair = device.post("/api/agent/pair", json={"name": "Auto pairing agent", "mode": "poll"}).json()
+    client, code = fresh_otp(journey, "auto-pair@example.test")
+    verified = client.post(
+        "/api/auth/verify",
+        json={"email": "auto-pair@example.test", "code": code, "pair_code": pair["user_code"]},
+    )
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["pair_binding_id"]
+    state = device.post(
+        "/api/agent/pair/status",
+        json={"pair_id": pair["pair_id"], "device_secret": pair["device_secret"]},
+    ).json()
+    assert state["state"] == "approved"
 
 
 def test_subscription_status_tool_works_before_purchase(journey):

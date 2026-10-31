@@ -14,7 +14,7 @@
   let displayedEvents = [], displayedArchives = [], eventBefore = null, archiveBefore = null, archiveBeforeId = null;
   let moreEvents = false, moreArchives = false, feedLoading = true, feedError = false;
   let feedGeneration = 0;
-  let pairDetails = null, pairChecking = false, pairApproved = false, pairCheckedCode = "", pairBindingId = null;
+  let pairDetails = null, pairChecking = false, pairApproved = false, pairCheckedCode = "", pairBindingId = null, pairAutoTried = false;
   let purchaseData = null, purchaseError = false, currentOrder = null, orderTimer = null, orderPolls = 0, agreedTermsVersion = null;
   const t = (key, vars = {}) => (bundle.strings[lang]?.[key] || key).replace(/\{(\w+)\}/g, (all, name) => vars[name] ?? all);
   function localMessage(value) {
@@ -215,8 +215,10 @@
     const code = $("#pair-code")?.value.trim().toUpperCase();
     if (code && code !== pairCheckedCode && !pairChecking) tasks.push(inspectPair());
     watchConnection();
-    if (waitForContent) await Promise.allSettled(tasks);
-    else void Promise.allSettled(tasks);
+    if (waitForContent) {
+      await Promise.allSettled(tasks);
+      await autoApprovePair();
+    } else void Promise.allSettled(tasks);
   }
   function watchConnection() {
     if ((!onboardingAgent && currentTab !== "connections") || !pairApproved || selectedAgent() || account?.bindings.some(b=>b.id===pairBindingId&&b.state==="revoked") || connectionPolls >= 20 || connectionTimer) return;
@@ -233,6 +235,23 @@
     $("#pair-agent-name").textContent = valid ? pairDetails.name : "";
     $("#approve-pair").disabled = !valid || pairApproved;
     $("#approve-pair").dataset.locked = String($("#approve-pair").disabled);
+  }
+  async function autoApprovePair() {
+    if (entry.get("manual") === "1" || pairAutoTried || pairApproved || activeAgent()) return;
+    const code = $("#pair-code")?.value.trim().toUpperCase();
+    if (!pairDetails || pairDetails.code !== code || pairDetails.expires_at * 1000 <= Date.now()) return;
+    pairAutoTried = true;
+    try {
+      const approved = await api('/api/pair/approve', 'POST', {code});
+      pairBindingId = approved.binding_id; pairApproved = true; pairDetails = null; connectionPolls = 0;
+      $("#pair-code").value = '';
+      const clean = new URL(location.href); clean.searchParams.delete("pair"); clean.searchParams.delete("manual");
+      history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
+      await loadAccount({feed:false}); toast(t("pair_saved"));
+    } catch (error) {
+      pairAutoTried = false;
+      status($("#pair-error"), error.message, true);
+    }
   }
   async function inspectPair() {
     const code = $("#pair-code").value.trim().toUpperCase();
@@ -399,7 +418,25 @@
   $("#resend-code")?.addEventListener("click",requestLoginCode);
   bind("#change-email","click",()=>{codeRequested=false;clearCodeCooldown();$("#code-fields").hidden=true;$("#code").required=false;$("#code").value='';$("#verify-code").disabled=true;$("#request-code").hidden=false;$("#request-code").disabled=false;$("#resend-code").disabled=true;$("#resend-code").textContent=t("resend_code");$("#login-status").dataset.statusKey='';status($("#login-status"),'');$("#email").focus();});
   $("#code")?.addEventListener("input",()=>{const input=$("#code");input.value=input.value.replace(/\D/g,"").slice(0,6);$("#verify-code").disabled=input.value.length!==6;});
-  bind("#login-form","submit",async()=>{try{await api('/api/auth/verify','POST',{email:$("#email").value,code:$("#code").value});}catch(error){$("#login-status").dataset.statusKey='';throw error;}$("#code").value='';$("#code-fields").hidden=true;$("#code").required=false;$("#request-code").hidden=true;try{await finishSignIn();toast(t("verified"));}catch(error){$("#retry-account").hidden=false;$("#login-status").dataset.statusKey='account_load_failed';status($("#login-status"),t("account_load_failed"),true);}});
+  bind("#login-form","submit",async()=>{
+    let verified;
+    try {
+      verified=await api('/api/auth/verify','POST',{
+        email:$("#email").value,
+        code:$("#code").value,
+        pair_code:entry.has("pair")&&entry.get("manual")!=="1"?($("#pair-code")?.value.trim().toUpperCase()||""):"",
+      });
+    }catch(error){$("#login-status").dataset.statusKey='';throw error;}
+    $("#code").value='';$("#code-fields").hidden=true;$("#code").required=false;$("#request-code").hidden=true;
+    if(verified.pair_binding_id){
+      pairBindingId=verified.pair_binding_id;pairApproved=true;pairDetails=null;connectionPolls=0;
+      $("#pair-code").value='';
+      const clean=new URL(location.href);clean.searchParams.delete("pair");history.replaceState(null,"",clean.pathname+clean.search+clean.hash);
+    }else if(verified.pair_error){
+      status($("#pair-error"),localMessage(verified.pair_error),true);
+    }
+    try{await finishSignIn();toast(t(verified.pair_binding_id?"pair_saved":"verified"));}catch(error){$("#retry-account").hidden=false;$("#login-status").dataset.statusKey='account_load_failed';status($("#login-status"),t("account_load_failed"),true);}
+  });
   bind("#retry-account", "click", async () => { await finishSignIn(); $("#retry-account").hidden=true; });
   bind("#onboard-read", "click", () => finishOnboarding("updates"));
   bind("#onboard-agent", "click", () => { onboardingAgent=true; connectionPolls=0; renderAccount(); $("#onboard-connect-heading").focus({preventScroll:true}); watchConnection(); });
@@ -421,11 +458,11 @@
     catch (_) { field.hidden = false; field.focus(); field.select(); toast(t("copy_manual")); }
   });
   bind("#inspect-pair", "click", inspectPair);
-  bind("#pair-code", "input", () => { pairDetails=null; pairCheckedCode=""; pairApproved=false; renderPair(); status($("#pair-error"), ""); });
+  bind("#pair-code", "input", () => { pairDetails=null; pairCheckedCode=""; pairApproved=false; pairAutoTried=false; renderPair(); status($("#pair-error"), ""); });
   bind("#pair-form","submit",async()=>{
     const code=$("#pair-code").value.trim().toUpperCase();
     if (!pairDetails || pairDetails.code !== code || pairDetails.expires_at * 1000 <= Date.now()) throw new Error(t("pair_link_invalid"));
-    const approved=await api('/api/pair/approve','POST',{code}); pairBindingId=approved.binding_id; pairApproved=true; connectionPolls=0; pairDetails=null; $("#pair-code").value=''; const clean=new URL(location.href); clean.searchParams.delete("pair"); history.replaceState(null,"",clean.pathname+clean.search+clean.hash);
+    const approved=await api('/api/pair/approve','POST',{code}); pairBindingId=approved.binding_id; pairApproved=true; connectionPolls=0; pairDetails=null; $("#pair-code").value=''; const clean=new URL(location.href); clean.searchParams.delete("pair"); clean.searchParams.delete("manual"); history.replaceState(null,"",clean.pathname+clean.search+clean.hash);
     await loadAccount({feed:false}); toast(t("pair_saved"));
   });
   bind("#binding-mode","change",()=>{$("#endpoint-field").hidden=$("#binding-mode").value!=='webhook';$("#endpoint").required=$("#binding-mode").value==='webhook';});

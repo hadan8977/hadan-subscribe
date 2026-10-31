@@ -117,7 +117,7 @@ def run():
                         page.locator('#onboard-agent').click()
                         expect(page.locator('#onboarding-progress')).to_be_visible()
                         expect(page.locator('#account .tabs')).to_be_hidden()
-                        page.goto(pair['verification_uri'])
+                        page.goto(pair['verification_uri'] + '&manual=1')
                         expect(page.locator('#pair-agent-name')).to_have_text('Inline delivery agent')
                         page.locator('#approve-pair').click();expect(page.locator('#onboard-connect-finish')).to_be_disabled()
                         device.headers['Authorization']='Bearer '+pair['device_secret']
@@ -135,7 +135,7 @@ def run():
                     with httpx.Client(base_url=origin,trust_env=False,timeout=15) as device:
                         pair=device.post('/api/agent/pair',json={'name':'Personal research agent','mode':'poll'}).json()
                         c=context();page=c.new_page()
-                        login(page,'agent-new@example.test',urlsplit(pair['verification_uri']).path+'?'+urlsplit(pair['verification_uri']).query)
+                        login(page,'agent-new@example.test',urlsplit(pair['verification_uri']).path+'?'+urlsplit(pair['verification_uri']).query+'&manual=1')
                         expect(page.locator('#view-subscriptions')).to_be_visible()
                         assert sub('agent-new@example.test') is None
                         assert device.post('/api/agent/pair/status',json={'pair_id':pair['pair_id'],'device_secret':pair['device_secret']}).json()['state']=='pending'

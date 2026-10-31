@@ -415,7 +415,7 @@ def run():
                     expect(reader.locator("#view-connections")).to_be_visible()
                     with httpx.Client(base_url=base,trust_env=False,timeout=20) as device:
                         initial_pair = device.post("/api/agent/pair",json={"name":"Reading assistant","mode":"poll"}).json()
-                    reader.goto(initial_pair["verification_uri"])
+                    reader.goto(initial_pair["verification_uri"] + "&manual=1")
                     expect(reader.locator("#pair-agent-name")).to_have_text("Reading assistant")
                     reader.locator("#approve-pair").click()
                     credential = initial_pair["device_secret"]
@@ -440,7 +440,7 @@ def run():
                     # Replace the default agent only after a real pairing and test sequence.
                     with httpx.Client(base_url=base,trust_env=False,timeout=20) as device:
                         pair = device.post("/api/agent/pair",json={"name":"Replacement assistant","mode":"poll"}).json()
-                        reader.goto(pair["verification_uri"])
+                        reader.goto(pair["verification_uri"] + "&manual=1")
                         expect(reader.locator("#pair-agent-name")).to_have_text("Replacement assistant")
                         reader.locator('#pair-form button[type="submit"]').click()
                         expect(reader.locator("#toast")).to_contain_text("Authorization saved")

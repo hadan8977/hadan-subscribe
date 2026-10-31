@@ -31,7 +31,7 @@ Discovery:
   Authorization: GET {{BASE_URL}}/oauth/authorize
   Token: POST {{BASE_URL}}/oauth/token (authorization_code or refresh_token; form encoded)
   Revocation: POST {{BASE_URL}}/oauth/revoke
-The owner verifies their email and approves the connection in the browser. The OAuth access token is bound to the owner's active Quant agent connection; revoking that connection invalidates the token. Do not ask the owner to copy a token into the conversation.
+The owner verifies their email in the browser. On a first connection the OAuth authorization completes automatically; no separate consent click is needed. Replacing an existing active connection still asks the owner to confirm. The OAuth access token is bound to the owner's active Quant agent connection; revoking that connection invalidates the token. Do not ask the owner to copy a token into the conversation.
 
 MCP
 POST {{BASE_URL}}/mcp
@@ -106,11 +106,11 @@ PAIRING (HTTPS API)
 POST /api/agent/pair
   JSON: {"name":"Recognizable agent name","mode":"poll"}
   Returns: pair_id, device_secret, user_code, verification_uri, expires_in (600 seconds).
-  Show verification_uri to the owner; the link carries the code, so the owner never types it. Creation supports polling only; manual webhook setup has been removed from the website.
+  Show verification_uri to the owner; the link carries the code, so the owner never types it. Creation supports polling only; manual webhook setup has been removed from the website. On a first connection, verifying the owner email on that link approves the pairing automatically; replacing an existing active connection still asks.
 GET /api/pair/details?code=<8-hex-user-code>
   Verified human session only. Returns name and expires_at before approval; no secrets.
 POST /api/pair/approve
-  Verified human session + CSRF, JSON {"code":"8-hex-user-code"}. The owner reviews scope and replacement before approving.
+  Verified human session + CSRF, JSON {"code":"8-hex-user-code"}. Used for replacement or manual approval; first-connection email verification auto-approves.
 POST /api/agent/pair/status
   JSON: {"pair_id":"...","device_secret":"..."}; returns state pending/approved and binding_id.
   Poll at least 5 seconds apart, stop at expiry. Approval creates a pending credential; it does not activate the connection.

@@ -367,7 +367,33 @@ def create_app(settings=None):
         session = s.verify_code(
             str(p.get("email", "")), str(p.get("code", "")), request.client.host
         )
-        response = JSONResponse({"ok": True})
+        me = s.session_user(session)
+        result = {"ok": True}
+        active = s.db.one(
+            "SELECT id FROM bindings WHERE user_id=? AND state='active'", (me["id"],)
+        )
+        # Email verification is the owner's consent. On a first connection,
+        # finish the waiting OAuth/pairing authorization without a second
+        # button. Replacing an existing active connection still asks.
+        oauth_request_id = p.get("oauth_request_id")
+        if isinstance(oauth_request_id, str) and oauth_request_id:
+            if active:
+                result["oauth_requires_approval"] = True
+            else:
+                try:
+                    result["oauth_redirect"] = oauth.approve(oauth_request_id, me["id"])
+                except OAuthError as exc:
+                    result["oauth_error"] = exc.description or exc.error
+        pair_code = p.get("pair_code")
+        if isinstance(pair_code, str) and pair_code:
+            if active:
+                result["pair_requires_approval"] = True
+            else:
+                try:
+                    result["pair_binding_id"] = s.approve_pair(me["id"], pair_code)["binding_id"]
+                except Problem as exc:
+                    result["pair_error"] = exc.message
+        response = JSONResponse(result)
         response.set_cookie(
             "hadan_session",
             session,
@@ -829,6 +855,15 @@ def create_app(settings=None):
             if current
             else None
         )
+        # A signed-in owner already proved mailbox ownership. On a first
+        # connection, finish the authorization without a second consent click.
+        # Replacing an existing active connection, or an explicit manual link,
+        # still shows the review page.
+        if current and not active and request.query_params.get("manual") != "1":
+            try:
+                return RedirectResponse(oauth.approve(request_id, current["id"]), 303)
+            except OAuthError:
+                pass
         return templates.TemplateResponse(
             request=request,
             name="oauth.html",

@@ -41,6 +41,15 @@
       }
     });
   }
+  const safeRedirect = (value) => {
+    const target = new URL(value);
+    const loopback = target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
+    const cursorCallback = target.protocol === "cursor:" && target.hostname === "anysphere.cursor-mcp" && target.pathname === "/oauth/callback";
+    if (target.protocol !== "https:" && !loopback && !cursorCallback) {
+      throw new Error("Invalid authorization redirect");
+    }
+    return target.href;
+  };
   if (codeForm) {
     codeForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -48,11 +57,18 @@
       button.disabled = true;
       status("Verifying…");
       try {
-        await request("/api/auth/verify", {
+        const result = await request("/api/auth/verify", {
           email: $("#oauth-email").value.trim(),
           code: $("#oauth-code").value.trim(),
+          oauth_request_id: codeForm.dataset.requestId || "",
         });
-        location.reload();
+        if (result.oauth_redirect) {
+          location.assign(safeRedirect(result.oauth_redirect));
+        } else if (result.oauth_error) {
+          status(result.oauth_error, true);
+        } else {
+          location.reload();
+        }
       } catch (error) {
         status(error.message, true);
       } finally {
@@ -85,13 +101,7 @@
         let data = {};
         try { data = await response.json(); } catch (_) {}
         if (!response.ok) throw new Error(data.error_description || data.error || "Authorization failed");
-        const target = new URL(data.redirect);
-        const loopback = target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
-        const cursorCallback = target.protocol === "cursor:" && target.hostname === "anysphere.cursor-mcp" && target.pathname === "/oauth/callback";
-        if (target.protocol !== "https:" && !loopback && !cursorCallback) {
-          throw new Error("Invalid authorization redirect");
-        }
-        location.assign(target.href);
+        location.assign(safeRedirect(data.redirect));
       } catch (error) {
         status(error.message, true);
         button.disabled = false;

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block page %}oauth{% endblock %}
 {% block title %}{{t('oauth_title')}}{% endblock %}
-{% block extra_head %}<script src="/static/oauth.js?v=20261030-agent3" defer></script>{% endblock %}
+{% block extra_head %}<script src="/static/oauth.js?v=20261031-autoapprove" defer></script>{% endblock %}
 {% block body %}
 <section class="login-panel oauth-panel">
   <p class="eyebrow">QUANT · AUTHORIZATION</p>
@@ -41,7 +41,7 @@
         <input id="oauth-email" name="email" type="email" autocomplete="email" required>
         <button type="submit" class="button">{{t('send_code')}}</button>
       </form>
-      <form id="oauth-code-form" hidden>
+      <form id="oauth-code-form" data-request-id="{{oauth_request.id}}" hidden>
         <label for="oauth-code">{{t('code_label')}}</label>
         <input id="oauth-code" name="code" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required>
         <button type="submit" class="button">{{t('verify_continue')}}</button>
