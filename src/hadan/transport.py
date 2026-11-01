@@ -151,7 +151,15 @@ class Transport:
             stage = "data"
             code, response = client.data(raw)
             if code >= 400:
-                raise DeliveryError(f"SMTP DATA rejected: {code}", retry=code < 500)
+                detail = (
+                    response.decode("utf-8", "replace")[:300].strip()
+                    if isinstance(response, bytes)
+                    else str(response)[:300]
+                )
+                raise DeliveryError(
+                    f"SMTP DATA rejected: {code} {detail}".strip(),
+                    retry=code < 500,
+                )
             return provider_message_id(response, message["Message-ID"])
         except DeliveryError:
             raise

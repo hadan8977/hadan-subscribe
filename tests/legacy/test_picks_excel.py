@@ -170,6 +170,9 @@ class PicksExcelTests(unittest.TestCase):
         self.assertEqual(
             ws.cell(r, cols["Next Earnings"]).value, datetime(2026, 10, 29)
         )
+        self.assertEqual(
+            ws.cell(r, cols["Next Earnings"]).number_format, picks_excel.FMT_DATE
+        )
         self.assertEqual(ws.cell(r, cols["Market Cap"]).value, 81.10e9)
         self.assertNotIn("P/E (TTM)", cols)  # "—" for every row -> column dropped
         self.assertEqual(ws.cell(r, cols["Status"]).value, "NEW")

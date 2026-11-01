@@ -67,7 +67,9 @@ FMT_MONEY = "$#,##0.00"
 FMT_PCT = "+0.00%;-0.00%;0.00%"
 FMT_GT = "0.00"
 FMT_SCORE = "+0.00;-0.00;0.00"
-FMT_DATE = "mmm d, yyyy"
+# Force English (US) month names so the dates do not render as "11月6日"
+# in a localized Excel/WPS display.
+FMT_DATE = "[$-409]mmm d, yyyy"
 FMT_CAP = '[>=1000000000]$#,##0.00,,,"B";[>=1000000]$#,##0.00,,"M";$#,##0'
 
 

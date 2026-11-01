@@ -275,7 +275,7 @@ class Service:
                 return dict(existing)  # Never silently reset delivery consent.
             sid = uid()
             db.execute(
-                "INSERT INTO subscriptions(id,user_id,product_id,created_at) VALUES(?,?,?,?)",
+                "INSERT INTO subscriptions(id,user_id,product_id,email_format,created_at) VALUES(?,?,?,'full',?)",
                 (sid, user_id, product_id, now),
             )
             db.execute("INSERT INTO delivery_preferences VALUES(?,'always')", (sid,))
@@ -295,8 +295,8 @@ class Service:
         for key in ("email_enabled", "agent_enabled"):
             if key in values and type(values[key]) is not bool:
                 raise Problem("交付开关必须是布尔值")
-        if values.get("email_format", "summary") not in ("summary", "full"):
-            raise Problem("无效的邮件交付方式")
+        if values.get("email_format", "full") != "full":
+            raise Problem("报告邮件固定为完整格式")
         with self.db.transaction() as db:
             row = db.execute(
                 "SELECT * FROM subscriptions WHERE id=? AND user_id=?", (sid, user_id)
