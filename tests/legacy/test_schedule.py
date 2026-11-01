@@ -56,6 +56,42 @@ def test_trading_and_closed_day_scan_windows(monkeypatch):
     assert (8, 50, "weekly_digest") in closed
 
 
+@pytest.mark.parametrize(
+    "day",
+    [
+        "2026-06-30",  # trading day
+        "2026-07-03",  # NYSE holiday
+        "2026-11-01",  # weekend
+    ],
+)
+def test_official_mail_checks_pre_and_post_market_every_day(day, monkeypatch):
+    monkeypatch.delenv("HADAN_SCHEDULE", raising=False)
+    plan = schedule.schedule_for_date(date.fromisoformat(day))
+    mail = sorted((h, m) for h, m, kind in plan if kind == "official_mail")
+    assert mail == [(8, 20), (17, 30)]
+    assert not any(
+        9 * 60 + 30 <= h * 60 + m < 16 * 60
+        for h, m, kind in plan
+        if kind == "official_mail"
+    )
+
+
+def test_weekend_agent_schedule_includes_post_close_mail_check(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from hadan import schedule_tool
+
+    monkeypatch.delenv("HADAN_SCHEDULE", raising=False)
+    now = datetime(2026, 11, 1, 9, 0, tzinfo=ZoneInfo("America/New_York"))
+    result = schedule_tool.upcoming_scans(now=now)
+    assert any(
+        scan["kind"] == "official_mail"
+        and scan["scan_at_new_york"].startswith("2026-11-01T17:30")
+        for scan in result["scans"]
+    )
+
+
 def test_custom_schedule_replaces_dynamic_plan(monkeypatch):
     monkeypatch.setenv("HADAN_SCHEDULE", "12:00:official_mail")
     assert schedule.schedule_for_date(date(2026, 6, 30)) == [(12, 0, "official_mail")]

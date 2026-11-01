@@ -26,6 +26,9 @@ HOLIDAY = [
     (8, 40, "daily_admin_status"),
     (8, 45, "health_site"),
     (8, 50, "weekly_digest"),
+    # Official mail is checked pre-open and post-close on every calendar day,
+    # not only on trading days.
+    (17, 30, "official_mail"),
 ]
 
 
