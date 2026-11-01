@@ -1,16 +1,13 @@
-# Hadan Subscribe
+# Project invariants
 
-Independent rewrite of quantcheck as a small private content subscription product.
-The production quantcheck checkout and /opt/quantcheck must remain untouched.
-
-## Product invariants
-- Email identifies a user; stable user IDs own subscriptions and pending events.
-- Authorization fails closed; user, subscription, binding and attachment access are checked server side.
-- Email preferences and agent preferences are independent. Unsubscribe must win over queued retries.
-- Provider acceptance is not processing confirmation. Retry only with a recorded idempotency identity; uncertain SMTP outcomes require reconciliation.
-- No credentials in public prompts, URLs, git, logs, browser storage or review artifacts.
-- Local/test mail uses a filesystem sink; no real recipient sends during development.
+- Email identifies a user; stable user IDs own subscriptions, receipts and pending events.
+- Authorization fails closed. User, subscription, binding, checkout and attachment access are checked server-side.
+- Email preferences and agent preferences are independent; an explicit opt-out must win over queued retries.
+- Provider acceptance is not processing confirmation. Retry with a recorded idempotency identity; reconcile uncertain SMTP outcomes.
+- QR checkout is owner-confirmed and single-use. After the owner confirms the live plan, price, method and terms in chat, an agent may prepare and display that QR; it never chooses the amount, pays, redeems or mutates a subscription.
+- Never commit credentials, `.env` files, runtime databases, private keys, production addresses or customer data.
 - Maintenance agents operate in an isolated checkout without production secrets. Policy and verification are enforced outside model instructions.
+- Keep the core deployable on one small Linux server. Run focused tests for each change; use the full suite only for broad refactors.
 
 ## Owner approval for outbound email
 
@@ -20,10 +17,3 @@ The production quantcheck checkout and /opt/quantcheck must remain untouched.
 - During debugging, development, testing, migrations and format changes, default to admin-only email. Use `HADAN_ADMIN_EMAILS` as the only allowed recipients unless the owner has explicitly approved a user send.
 - A successful test send, a passing job or a previous approval does not authorize a new user-facing send.
 - Never use a historical recipient list, the retired quantcheck recipient files, or an inferred audience to bypass this rule.
-
-## Working practices
-- Keep the core deployable on a single small Linux server. Optional browser/model integrations load only when needed.
-- Prefer standard library and server-rendered HTML; justify additional services/dependencies.
-- Run meaningful user-flow, authorization, crash recovery, concurrency and migration tests.
-- Document implemented, locally tested and environment-blocked capabilities separately.
-- Subagent reviews must cover functionality, user experience, operational reliability and security. Fix findings and rerun affected checks.
